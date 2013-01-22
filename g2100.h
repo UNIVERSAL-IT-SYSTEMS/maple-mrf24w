@@ -48,20 +48,6 @@ extern "C" {
 #define WIRELESS_MODE_INFRA	1
 #define WIRELESS_MODE_ADHOC	2
 
-  extern uint8_t local_ip[4];
-  extern uint8_t gateway_ip[4];
-  extern uint8_t subnet_mask[4];
-  extern char ssid[/* max 32 bytes */];
-  extern uint8_t ssid_len;
-  extern char security_passphrase[/* max 64 */];
-  extern uint8_t security_passphrase_len;
-  extern uint8_t security_type;
-  extern uint8_t wireless_mode;
-  extern char wep_keys[];
-  extern unsigned char mfg_id[4];
-  extern gpio_dev* zg_cs_port;
-  extern uint8_t zg_cs_pin;
-
 #define u8 uint8_t
 #define U8 uint8_t
 #define u16 uint16_t

@@ -36,6 +36,7 @@ Description:	Driver for the ZeroG Wireless G2100 series devices
 #include <string.h>
 #include "uip/uip.h"
 #include "g2100.h"
+#include "spi.h"
 
 #include "libmaple.h"
 #include "nvic.h"
@@ -48,6 +49,17 @@ Description:	Driver for the ZeroG Wireless G2100 series devices
 #else
 #define zg2100_spi_dbg(...)
 #endif
+
+extern char zg_ssid[/* max 32 bytes */];
+uint8_t zg_ssid_len;
+extern char zg_security_passphrase[/* max 64 */];
+uint8_t zg_security_passphrase_len;
+extern uint8_t zg_security_type;
+extern uint8_t zg_wireless_mode;
+extern uint8_t* zg_wep_keys;
+extern spi_dev* zg_spi;
+extern gpio_dev* zg_cs_port;
+extern uint8_t zg_cs_bit;
 
 static U8 mac[6];
 
@@ -80,21 +92,21 @@ void zg_init() {
   zg_interrupt_reg(0xff, 0);
   zg_interrupt_reg(0x80 | 0x40, 1);
 
-  ssid_len = (U8) strlen(ssid);
-  security_passphrase_len = (U8) strlen(security_passphrase);
+  zg_ssid_len = (U8) strlen(zg_ssid);
+  zg_security_passphrase_len = (U8) strlen(zg_security_passphrase);
 }
 
 void spi_transfer(volatile U8* buf, U16 len, U8 toggle_cs) {
   U16 i;
 
-  gpio_write_bit(zg_cs_port, zg_cs_pin, 0);
+  gpio_write_bit(zg_cs_port, zg_cs_bit, 0);
 
   for (i = 0; i < len; i++) {
-    buf[i] = spi_tx_byte(1, buf[i]);
+    buf[i] = spi_tx(zg_spi, (const void *) &buf[i], 1);
   }
 
   if (toggle_cs) {
-    gpio_write_bit(zg_cs_port, zg_cs_pin, 1);
+    gpio_write_bit(zg_cs_port, zg_cs_bit, 1);
   }
 
   return;
@@ -321,10 +333,10 @@ void zg_write_wep_key(U8* cmd_buf) {
   cmd->slot = 3; // WEP key slot
   cmd->keyLen = 13; // Key length: 5 bytes (64-bit WEP); 13 bytes (128-bit WEP)
   cmd->defID = 0; // Default key ID: Key 0, 1, 2, 3
-  cmd->ssidLen = ssid_len;
+  cmd->ssidLen = zg_ssid_len;
   memset(cmd->ssid, 0x00, 32);
-  memcpy(cmd->ssid, ssid, ssid_len);
-  memcpy(cmd->key, wep_keys, ZG_MAX_ENCRYPTION_KEYS * ZG_MAX_ENCRYPTION_KEY_SIZE);
+  memcpy(cmd->ssid, zg_ssid, zg_ssid_len);
+  memcpy(cmd->key, zg_wep_keys, ZG_MAX_ENCRYPTION_KEYS * ZG_MAX_ENCRYPTION_KEY_SIZE);
 
   return;
 }
@@ -333,13 +345,13 @@ static void zg_calc_psk_key(U8* cmd_buf) {
   zg_psk_calc_req_t* cmd = (zg_psk_calc_req_t*) cmd_buf;
 
   cmd->configBits = 0;
-  cmd->phraseLen = security_passphrase_len;
-  cmd->ssidLen = ssid_len;
+  cmd->phraseLen = zg_security_passphrase_len;
+  cmd->ssidLen = zg_ssid_len;
   cmd->reserved = 0;
   memset(cmd->ssid, 0x00, 32);
-  memcpy(cmd->ssid, ssid, ssid_len);
+  memcpy(cmd->ssid, zg_ssid, zg_ssid_len);
   memset(cmd->passPhrase, 0x00, 64);
-  memcpy(cmd->passPhrase, security_passphrase, security_passphrase_len);
+  memcpy(cmd->passPhrase, zg_security_passphrase, zg_security_passphrase_len);
 
   return;
 }
@@ -348,9 +360,9 @@ static void zg_write_psk_key(U8* cmd_buf) {
   zg_pmk_key_req_t* cmd = (zg_pmk_key_req_t*) cmd_buf;
 
   cmd->slot = 0; // WPA/WPA2 PSK slot
-  cmd->ssidLen = ssid_len;
+  cmd->ssidLen = zg_ssid_len;
   memset(cmd->ssid, 0x00, 32);
-  memcpy(cmd->ssid, ssid, cmd->ssidLen);
+  memcpy(cmd->ssid, zg_ssid, cmd->ssidLen);
   memcpy(cmd->keyData, wpa_psk_key, ZG_MAX_PMK_LEN);
 
   return;
@@ -400,7 +412,7 @@ void zg_drv_process() {
               zg_drv_state = DRV_STATE_START_CONN;
               break;
             case ZG_MAC_SUBTYPE_MGMT_REQ_CONNECT:
-              LEDConn_on();
+              zg_LEDConn_on();
               zg_conn_status = 1; // connected
               break;
             default:
@@ -415,7 +427,7 @@ void zg_drv_process() {
         switch (zg_buf[2]) {
           case ZG_MAC_SUBTYPE_MGMT_IND_DISASSOC:
           case ZG_MAC_SUBTYPE_MGMT_IND_DEAUTH:
-            LEDConn_off();
+            zg_LEDConn_off();
             zg_conn_status = 0; // lost connection
 
             //try to reconnect
@@ -426,14 +438,14 @@ void zg_drv_process() {
             U16 status = (((U16) (zg_buf[3])) << 8) | zg_buf[4];
 
             if (status == 1 || status == 5) {
-              LEDConn_off();
+              zg_LEDConn_off();
               zg_init();
               /* Block execution until reconnected  */
               while (zg_get_conn_state() != 1) {
                 zg_drv_process();
               }
             } else if (status == 2 || status == 6) {
-              LEDConn_on();
+              zg_LEDConn_on();
               zg_conn_status = 1; // connected
             }
           }
@@ -464,7 +476,7 @@ void zg_drv_process() {
       zg_drv_state = DRV_STATE_IDLE;
       break;
     case DRV_STATE_SETUP_SECURITY:
-      switch (security_type) {
+      switch (zg_security_type) {
         case ZG_SECURITY_TYPE_NONE:
           zg_drv_state = DRV_STATE_ENABLE_CONN_MANAGE;
           break;
@@ -543,18 +555,18 @@ void zg_drv_process() {
       zg_buf[1] = ZG_MAC_TYPE_MGMT_REQ;
       zg_buf[2] = ZG_MAC_SUBTYPE_MGMT_REQ_CONNECT;
 
-      cmd->secType = security_type;
+      cmd->secType = zg_security_type;
 
-      cmd->ssidLen = ssid_len;
+      cmd->ssidLen = zg_ssid_len;
       memset(cmd->ssid, 0, 32);
-      memcpy(cmd->ssid, ssid, ssid_len);
+      memcpy(cmd->ssid, zg_ssid, zg_ssid_len);
 
       // units of 100 milliseconds
       cmd->sleepDuration = 0;
 
-      if (wireless_mode == WIRELESS_MODE_INFRA)
+      if (zg_wireless_mode == WIRELESS_MODE_INFRA)
         cmd->modeBss = 1;
-      else if (wireless_mode == WIRELESS_MODE_ADHOC)
+      else if (zg_wireless_mode == WIRELESS_MODE_ADHOC)
         cmd->modeBss = 2;
 
       spi_transfer(zg_buf, ZG_CONNECT_REQ_SIZE + 3, 1);

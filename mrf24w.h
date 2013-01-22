@@ -5,18 +5,10 @@
 #include <wirish/boards.h>
 #include <HardwareSPI.h>
 #include <stdint.h>
-#include "uip/timer.h"
-
-/**
- * A second, measured in system clock time.
- *
- * \hideinitializer
- */
-#ifdef CLOCK_CONF_SECOND
-#define CLOCK_SECOND CLOCK_CONF_SECOND
-#else
-#define CLOCK_SECOND (clock_time_t)32
-#endif
+#include "g2100.h"
+extern "C" {
+#include "uip/uip.h"
+}
 
 class Mrf24w {
 public:
@@ -25,17 +17,17 @@ public:
   void end();
   void loop();
 
+  void setLocalIp(uint8_t localIpAddr[]);
+  void setGatewayIp(uint8_t gatewayIpAddr[]);
+  void setSubnetMask(uint8_t subnetMask[]);
+  void setSSID(const char* ssid);
+  void setSecurityPassphrase(const char* securityPassphrase);
+  void setSecurityType(uint8_t securityType);
+  void setWirelessMode(uint8_t wirelessMode);
+
 private:
   uint8_t m_csPin;
   uint8_t m_intPin;
-
-  struct timer m_periodicTimer;
-  struct timer m_arpTimer;
-  struct timer m_selfArpTimer;
-
-  void network_send(void);
-  unsigned int network_read(void);
-  void arpSelf();
 };
 
 #endif	/* MRF24W_H */

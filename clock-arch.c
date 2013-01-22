@@ -35,11 +35,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <systick.h>
 
 #include "clock-arch.h"
 
 //Return time
 clock_time_t clock_time()
 {
-	return millis();
+	return systick_uptime();
 }

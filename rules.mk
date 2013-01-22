@@ -9,7 +9,7 @@ BUILDDIRS += $(BUILD_PATH)/$(d)/uip
 CFLAGS_$(d) := $(WIRISH_INCLUDES) $(LIBMAPLE_INCLUDES)
 
 # Local rules and targets
-cSRCS_$(d) := g2100.c clock-arch.c uip/uip.c uip/memb.c uip/psock.c uip/timer.c uip/uip-fw.c uip/uip-neighbor.c uip/split.c uip/uip_arp.c uip/uiplib.c
+cSRCS_$(d) := g2100.c clock-arch.c stack.c network.c uip/uip.c uip/memb.c uip/psock.c uip/timer.c uip/uip-fw.c uip/uip-neighbor.c uip/uip-split.c uip/uip_arp.c uip/uiplib.c
 
 cppSRCS_$(d) := mrf24w.cpp
 
