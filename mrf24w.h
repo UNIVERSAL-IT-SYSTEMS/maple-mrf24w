@@ -5,9 +5,18 @@
 #include <wirish/boards.h>
 #include <HardwareSPI.h>
 #include <stdint.h>
+#include "uip/timer.h"
 
-#define WIRELESS_MODE_INFRA	1
-#define WIRELESS_MODE_ADHOC	2
+/**
+ * A second, measured in system clock time.
+ *
+ * \hideinitializer
+ */
+#ifdef CLOCK_CONF_SECOND
+#define CLOCK_SECOND CLOCK_CONF_SECOND
+#else
+#define CLOCK_SECOND (clock_time_t)32
+#endif
 
 class Mrf24w {
 public:
@@ -19,22 +28,14 @@ public:
 private:
   uint8_t m_csPin;
   uint8_t m_intPin;
-  
-  static struct timer m_periodicTimer;
-  static struct timer m_arpTimer;
-  static struct timer m_selfArpTimer;
 
-  //  uint8_t local_ip[];
-  //  uint8_t gateway_ip[];
-  //  uint8_t subnet_mask[];
-  //  const char ssid[];
-  //  uint8_t ssid_len;
-  //  const char security_passphrase[];
-  //  uint8_t security_passphrase_len;
-  //  uint8_t security_type;
-  //  uint8_t wireless_mode;
-  //  const char wep_keys[];
-  //  unsigned char mfg_id[4];
+  struct timer m_periodicTimer;
+  struct timer m_arpTimer;
+  struct timer m_selfArpTimer;
+
+  void network_send(void);
+  unsigned int network_read(void);
+  void arpSelf();
 };
 
 #endif	/* MRF24W_H */
