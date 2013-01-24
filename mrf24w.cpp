@@ -11,13 +11,20 @@ uint8_t stack_subnet_mask[4] = {255, 255, 255, 0};
 char zg_ssid[32];
 char zg_security_passphrase[64];
 uint8_t zg_security_type = ZG_SECURITY_TYPE_NONE;
-uint8_t zg_wireless_mode = WIRELESS_MODE_INFRA;
+uint8_t zg_wireless_mode = ZG_WIRELESS_MODE_INFRA;
 uint8_t* zg_wep_keys;
 spi_dev* zg_spi;
 gpio_dev* zg_cs_port;
 uint8_t zg_cs_bit;
 
-Mrf24w::Mrf24w(HardwareSPI &spi, uint8_t csPin, uint8_t intPin) : m_csPin(csPin), m_intPin(intPin) {
+void Mrf24w_zg_hook_on_connected(void* userData, uint8_t connected) {
+  Mrf24w* mrf24w = (Mrf24w*) userData;
+  if (mrf24w) {
+    mrf24w->connected(connected);
+  }
+}
+
+Mrf24w::Mrf24w(HardwareSPI &spi, uint8_t csPin, uint8_t intPin) : m_csPin(csPin), m_intPin(intPin), m_connectedFn(NULL) {
   const stm32_pin_info *csPinInfo = &PIN_MAP[csPin];
 
   zg_spi = spi.c_dev();
@@ -32,12 +39,12 @@ void Mrf24w::begin() {
   pinMode(m_csPin, OUTPUT);
   digitalWrite(m_csPin, HIGH);
 
-  while (zg_get_conn_state() != 1) {
-    zg_drv_process();
-  }
-
+  Serial1.println("zg_init");
+  zg_hook_on_connected = Mrf24w_zg_hook_on_connected;
+  zg_hook_on_connected_user_data = this;
   zg_init();
-  stack_init();
+
+  Serial1.println("begin end");
 }
 
 void Mrf24w::end() {
@@ -45,7 +52,9 @@ void Mrf24w::end() {
 }
 
 void Mrf24w::loop() {
-  stack_loop();
+  if (zg_get_conn_state()) {
+    stack_loop();
+  }
   zg_drv_process();
 }
 
@@ -75,4 +84,18 @@ void Mrf24w::setSecurityType(uint8_t securityType) {
 
 void Mrf24w::setWirelessMode(uint8_t wirelessMode) {
   zg_wireless_mode = wirelessMode;
+}
+
+void Mrf24w::connected(uint8_t connected) {
+  if (connected) {
+    Serial1.println("connected");
+
+    Serial1.println("stack_init");
+    stack_init();
+  } else {
+    Serial1.println("disconnected");
+  }
+  if (m_connectedFn) {
+    m_connectedFn(connected);
+  }
 }
