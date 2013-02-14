@@ -281,7 +281,10 @@ void zg_isr() {
 }
 
 void zg_process_isr() {
+  uint16_t i;
   intr_occured = 0;
+
+  delay_us(10000);
 
   usart_putstr(USART1, "zg_process_isr");
   uint8_t value = zg_read_8bit_wf_register(ZG_INTR_REG);
@@ -297,20 +300,26 @@ void zg_process_isr() {
   } else if (value) {
     usart_putc(USART1, 'v');
     usart_puthex8(value);
-    return;
+    goto done;
   } else {
-    return;
+    goto done;
   }
 
   // Get the size of the incoming packet
-  uint16_t rx_byte_cnt = value & 0x0fff;
+  uint16_t rx_byte_cnt = (value & 0x0fff) + 1;
   usart_puthex16(rx_byte_cnt);
 
   // Check if our buffer is large enough for packet
-  if (rx_byte_cnt + 1 < (uint16_t) UIP_BUFSIZE) {
+  if (rx_byte_cnt < (uint16_t) UIP_BUFSIZE) {
     zg_buf[0] = ZG_CMD_RD_FIFO;
     // Copy ZG2100 buffer contents into zg_buf (uip_buf)
-    spi_transfer(zg_buf, rx_byte_cnt + 1, 1);
+    spi_transfer(zg_buf, rx_byte_cnt, 1);
+
+    usart_putc(USART1, '\n');
+    for (i = 0; i < rx_byte_cnt; i++) {
+      usart_puthex8(zg_buf[i]);
+    }
+
     // interrupt from zg2100 was meaningful and requires further processing
     intr_valid = 1;
   } else {
@@ -322,6 +331,7 @@ void zg_process_isr() {
   hdr[0] = ZG_CMD_RD_FIFO_DONE;
   spi_transfer(hdr, 1, 1);
 
+done:
   usart_putc(USART1, '\n');
 }
 
@@ -527,6 +537,7 @@ void zg_drv_state_setup_security() {
 
 void zg_drv_state_get_mac() {
   usart_putstr(USART1, "zg_drv_state_get_mac");
+  delay_us(100000);
 
   // get MAC address
   zg_buf[0] = ZG_CMD_WT_FIFO_MGMT;
@@ -536,15 +547,17 @@ void zg_drv_state_get_mac() {
   zg_buf[4] = ZG_PARAM_MAC_ADDRESS;
   spi_transfer(zg_buf, 5, 1);
 
+  delay_us(100000);
   zg_buf[0] = ZG_CMD_WT_FIFO_DONE;
   spi_transfer(zg_buf, 1, 1);
 
+  delay_us(100000);
   zg_drv_state = DRV_STATE_IDLE;
 }
 
 void zg_drv_state_enable_conn_manage() {
   usart_putstr(USART1, "zg_drv_state_enable_conn_manage");
-  delay_us(10000);
+  delay_us(100000);
   zg_connect_manage_t* cmd = (zg_connect_manage_t*) & zg_buf[3];
 
   // enable connection manager
@@ -557,19 +570,21 @@ void zg_drv_state_enable_conn_manage() {
   cmd->unknown = 0;
   spi_transfer(zg_buf, sizeof (zg_connect_manage_t) + 3, 1);
 
-  delay_us(10000);
+  delay_us(100000);
   zg_buf[0] = ZG_CMD_WT_FIFO_DONE;
   spi_transfer(zg_buf, 1, 1);
-  delay_us(10000);
+  delay_us(100000);
   intr_occured = 1;
 
   zg_drv_state = DRV_STATE_IDLE;
 }
 
 void zg_drv_state_start_conn() {
-  usart_putstr(USART1, "zg_drv_state_start_conn");
+  usart_putstr(USART1, "zg_drv_state_start_conn\n");
+  delay_us(100000);
 
   zg_connect_req_t* cmd = (zg_connect_req_t*) & zg_buf[3];
+  memset(cmd, 0, sizeof(zg_connect_req_t));
 
   // start connection to AP
   zg_buf[0] = ZG_CMD_WT_FIFO_MGMT;
@@ -577,10 +592,18 @@ void zg_drv_state_start_conn() {
   zg_buf[2] = ZG_MAC_SUBTYPE_MGMT_REQ_CONNECT;
 
   cmd->secType = zg_security_type;
+  usart_putstr(USART1, "secType: ");
+  usart_putudec(USART1, cmd->secType);
+  usart_putstr(USART1, "\n");
 
   cmd->ssidLen = zg_ssid_len;
-  memset(cmd->ssid, 0, 32);
   memcpy(cmd->ssid, zg_ssid, zg_ssid_len);
+  usart_putstr(USART1, "ssidLen: ");
+  usart_putudec(USART1, cmd->ssidLen);
+  usart_putstr(USART1, "\n");
+  usart_putstr(USART1, "ssid: ");
+  usart_putstr(USART1, cmd->ssid);
+  usart_putstr(USART1, "\n");
 
   // units of 100 milliseconds
   cmd->sleepDuration = 0;
@@ -590,13 +613,20 @@ void zg_drv_state_start_conn() {
   } else if (zg_wireless_mode == ZG_WIRELESS_MODE_ADHOC) {
     cmd->modeBss = 2;
   }
+  usart_putstr(USART1, "modeBss: ");
+  usart_putudec(USART1, cmd->modeBss);
+  usart_putstr(USART1, "\n");
 
   spi_transfer(zg_buf, sizeof (zg_connect_req_t) + 3, 1);
 
+  delay_us(100000);
   zg_buf[0] = ZG_CMD_WT_FIFO_DONE;
   spi_transfer(zg_buf, 1, 1);
+  delay_us(100000);
+  intr_occured = 1;
 
   zg_drv_state = DRV_STATE_IDLE;
+  usart_putstr(USART1, "done\n");
 }
 
 void zg_drv_state_install_psk() {
@@ -622,6 +652,11 @@ void zg_process_intr() {
       cnf_pending = 0;
       break;
     case ZG_MAC_TYPE_MGMT_CONFIRM:
+      // empty buffer
+      if (zg_buf[3] == 0) {
+        break;
+      }
+
       usart_putstr(USART1, "ZG_MAC_TYPE_MGMT_CONFIRM");
       usart_puthex8(zg_buf[3]);
       usart_puthex8(zg_buf[2]);
@@ -635,6 +670,11 @@ void zg_process_intr() {
             mac[3] = zg_buf[10];
             mac[4] = zg_buf[11];
             mac[5] = zg_buf[12];
+
+            // clear buffer results incase of duplicate ISRs
+            zg_buf[2] = 0;
+            zg_buf[3] = 0;
+
             zg_drv_state = DRV_STATE_SETUP_SECURITY;
             break;
           case ZG_MAC_SUBTYPE_MGMT_REQ_WEP_KEY:
@@ -659,6 +699,10 @@ void zg_process_intr() {
           default:
             break;
         }
+      } else {
+        usart_putstr(USART1, "ZG_MAC_TYPE_MGMT_CONFIRM fail: ");
+        usart_puthex8(zg_buf[3]);
+        usart_putc(USART1, '\n');
       }
       break;
     case ZG_MAC_TYPE_RXDATA_INDICATE:

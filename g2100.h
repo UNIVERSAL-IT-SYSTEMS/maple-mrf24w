@@ -91,14 +91,14 @@ extern "C" {
 #define ZG_MAC_SUBTYPE_TXDATA_REQ_STD			((u8)1)
 
   // Subtype for ZG_MAC_TYPE_MGMT_REQ and ZG_MAC_TYPE_MGMT_CONFIRM
-#define ZG_MAC_SUBTYPE_MGMT_REQ_PMK_KEY        8
-#define ZG_MAC_SUBTYPE_MGMT_REQ_WEP_KEY        10
-#define ZG_MAC_SUBTYPE_MGMT_REQ_CALC_PSK       12
-#define ZG_MAC_SUBTYPE_MGMT_REQ_SET_PARAM      15
-#define ZG_MAC_SUBTYPE_MGMT_REQ_GET_PARAM      16
-#define ZG_MAC_SUBTYPE_MGMT_REQ_ADHOC_START    18
-#define ZG_MAC_SUBTYPE_MGMT_REQ_CONNECT        19
-#define ZG_MAC_SUBTYPE_MGMT_REQ_CONNECT_MANAGE 20
+#define ZG_MAC_SUBTYPE_MGMT_REQ_PMK_KEY        0x08
+#define ZG_MAC_SUBTYPE_MGMT_REQ_WEP_KEY        0x0a
+#define ZG_MAC_SUBTYPE_MGMT_REQ_CALC_PSK       0x0c
+#define ZG_MAC_SUBTYPE_MGMT_REQ_SET_PARAM      0x0f
+#define ZG_MAC_SUBTYPE_MGMT_REQ_GET_PARAM      0x10
+#define ZG_MAC_SUBTYPE_MGMT_REQ_ADHOC_START    0x12
+#define ZG_MAC_SUBTYPE_MGMT_REQ_CONNECT        0x13
+#define ZG_MAC_SUBTYPE_MGMT_REQ_CONNECT_MANAGE 0x14
 
   // Subtype for ZG_MAC_TYPE_RXDATA_INDICATE
 #define ZG_MAC_SUBTYPE_RXDATA_IND_STD          1
@@ -131,17 +131,12 @@ extern "C" {
     ZG_RESULT_AUTH_REFUSED = 0x0f, // authenticating node refused our request
     ZG_RESULT_ASSOC_REFUSED = 0x10, // associating node refused our request
     ZG_RESULT_REQ_IN_PROGRESS = 0x11, // only one mlme request at a time allowed
-    ZG_RESULT_NOT_JOINED = 0x12, // operation requires that device be joined
-    // with target
-    ZG_RESULT_NOT_ASSOC = 0x13, // operation requires that device be
-    // associated with target
-    ZG_RESULT_NOT_AUTH = 0x14, // operation requires that device be
-    // authenticated with target
+    ZG_RESULT_NOT_JOINED = 0x12, // operation requires that device be joined with target
+    ZG_RESULT_NOT_ASSOC = 0x13, // operation requires that device be associated with target
+    ZG_RESULT_NOT_AUTH = 0x14, // operation requires that device be authenticated with target
     ZG_RESULT_SUPPLICANT_FAILED = 0x15,
     ZG_RESULT_UNSUPPORTED_FEATURE = 0x16,
-    ZG_RESULT_REQUEST_OUT_OF_SYNC = 0x17 // Returned when a request is recognized
-    // but invalid given the current state
-    // of the MAC
+    ZG_RESULT_REQUEST_OUT_OF_SYNC = 0x17 // Returned when a request is recognized but invalid given the current state of the MAC
   };
 
 #define ZG_WRITE_REGISTER_MASK 0x00
