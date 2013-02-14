@@ -99,6 +99,7 @@ extern "C" {
 #define ZG_MAC_SUBTYPE_MGMT_REQ_ADHOC_START    0x12
 #define ZG_MAC_SUBTYPE_MGMT_REQ_CONNECT        0x13
 #define ZG_MAC_SUBTYPE_MGMT_REQ_CONNECT_MANAGE 0x14
+#define ZG_MAX_SUBTYPE_MGMT_REQ_SCAN_START     0x1f
 
   // Subtype for ZG_MAC_TYPE_RXDATA_INDICATE
 #define ZG_MAC_SUBTYPE_RXDATA_IND_STD          1
@@ -141,6 +142,8 @@ extern "C" {
 
 #define ZG_WRITE_REGISTER_MASK 0x00
 #define ZG_READ_REGISTER_MASK  0x40
+
+#define ZG_SCAN_ALL ((uint8_t)(0xff))
 
   /*
    * G2100 command registers
@@ -329,6 +332,7 @@ extern "C" {
 
   void zg_init();
   void zg_reset();
+  void zg_scan();
   void zg_chip_reset();
   void zg_config_low_power_mode(uint8_t action);
   void zg_isr();

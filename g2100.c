@@ -284,8 +284,6 @@ void zg_process_isr() {
   uint16_t i;
   intr_occured = 0;
 
-  delay_us(10000);
-
   usart_putstr(USART1, "zg_process_isr");
   uint8_t value = zg_read_8bit_wf_register(ZG_INTR_REG);
   value |= zg_read_8bit_wf_register(ZG_INTR_MASK_REG);
@@ -535,9 +533,37 @@ void zg_drv_state_setup_security() {
   }
 }
 
+void zg_scan() {
+  uint8_t hdr[4];
+
+  /* WARNING !!! : 
+   * Host scan is allowed only in idle or connected state. 
+   * If module FW is in the midst of connection ( or reconenction) process, then
+   * host scan can hammer connection process, and furthermore it may cause
+   * fatal failure in module FW operation. To be safte to use host scan, we strongly
+   * recommend you to disable module FW connection manager by uncommenting
+   * #define DISABLE_MODULE_FW_CONNECT_MANAGER_IN_INFRASTRUCTURE    
+   * in WF_Config.h
+   */
+  hdr[0] = ZG_CMD_WT_FIFO_MGMT;
+  hdr[1] = ZG_MAC_TYPE_MGMT_REQ;
+  hdr[2] = ZG_MAX_SUBTYPE_MGMT_REQ_SCAN_START;
+  hdr[3] = ZG_SCAN_ALL; /* Connection Profile ID */
+  hdr[4] = 0; /* not used              */
+  spi_transfer(zg_buf, 5, 1);
+
+  zg_buf[0] = ZG_CMD_WT_FIFO_DONE;
+  spi_transfer(zg_buf, 1, 1);
+
+  zg_drv_state = DRV_STATE_IDLE;
+}
+
+void zg_connect() {
+  zg_drv_state = DRV_STATE_SETUP_SECURITY;
+}
+
 void zg_drv_state_get_mac() {
   usart_putstr(USART1, "zg_drv_state_get_mac");
-  delay_us(100000);
 
   // get MAC address
   zg_buf[0] = ZG_CMD_WT_FIFO_MGMT;
@@ -547,17 +573,14 @@ void zg_drv_state_get_mac() {
   zg_buf[4] = ZG_PARAM_MAC_ADDRESS;
   spi_transfer(zg_buf, 5, 1);
 
-  delay_us(100000);
   zg_buf[0] = ZG_CMD_WT_FIFO_DONE;
   spi_transfer(zg_buf, 1, 1);
 
-  delay_us(100000);
   zg_drv_state = DRV_STATE_IDLE;
 }
 
 void zg_drv_state_enable_conn_manage() {
   usart_putstr(USART1, "zg_drv_state_enable_conn_manage");
-  delay_us(100000);
   zg_connect_manage_t* cmd = (zg_connect_manage_t*) & zg_buf[3];
 
   // enable connection manager
@@ -570,21 +593,17 @@ void zg_drv_state_enable_conn_manage() {
   cmd->unknown = 0;
   spi_transfer(zg_buf, sizeof (zg_connect_manage_t) + 3, 1);
 
-  delay_us(100000);
   zg_buf[0] = ZG_CMD_WT_FIFO_DONE;
   spi_transfer(zg_buf, 1, 1);
-  delay_us(100000);
-  intr_occured = 1;
 
   zg_drv_state = DRV_STATE_IDLE;
 }
 
 void zg_drv_state_start_conn() {
   usart_putstr(USART1, "zg_drv_state_start_conn\n");
-  delay_us(100000);
 
   zg_connect_req_t* cmd = (zg_connect_req_t*) & zg_buf[3];
-  memset(cmd, 0, sizeof(zg_connect_req_t));
+  memset(cmd, 0, sizeof (zg_connect_req_t));
 
   // start connection to AP
   zg_buf[0] = ZG_CMD_WT_FIFO_MGMT;
@@ -619,11 +638,8 @@ void zg_drv_state_start_conn() {
 
   spi_transfer(zg_buf, sizeof (zg_connect_req_t) + 3, 1);
 
-  delay_us(100000);
   zg_buf[0] = ZG_CMD_WT_FIFO_DONE;
   spi_transfer(zg_buf, 1, 1);
-  delay_us(100000);
-  intr_occured = 1;
 
   zg_drv_state = DRV_STATE_IDLE;
   usart_putstr(USART1, "done\n");
@@ -675,7 +691,7 @@ void zg_process_intr() {
             zg_buf[2] = 0;
             zg_buf[3] = 0;
 
-            zg_drv_state = DRV_STATE_SETUP_SECURITY;
+            zg_drv_state = DRV_STATE_IDLE;
             break;
           case ZG_MAC_SUBTYPE_MGMT_REQ_WEP_KEY:
             zg_drv_state = DRV_STATE_ENABLE_CONN_MANAGE;
