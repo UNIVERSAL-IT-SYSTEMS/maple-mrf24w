@@ -136,6 +136,20 @@ void usart_puthex16(usart_dev* dev, uint16_t value) {
 #define WF_ERROR_HOST_SCAN_NOT_ALLOWED                          ((uint16_t)42)
 #define WF_ERROR_INVALID_WPS_PIN                                ((uint16_t)44)
 
+/*-----------------------------------------------------------------------*/
+/* defines used for the p_currentCpID value in WF_CMGetConnectionState() */
+/*-----------------------------------------------------------------------*/
+#define WF_CURRENT_CPID_NONE    (0)
+#define WF_CURRENT_CPID_LIST    (0xff)
+
+/* Connection States */
+#define WF_CSTATE_NOT_CONNECTED                 (1)
+#define WF_CSTATE_CONNECTION_IN_PROGRESS        (2)
+#define WF_CSTATE_CONNECTED_INFRASTRUCTURE      (3)
+#define WF_CSTATE_CONNECTED_ADHOC               (4)
+#define WF_CSTATE_RECONNECTION_IN_PROGRESS      (5)
+#define WF_CSTATE_CONNECTION_PERMANENTLY_LOST   (6)
+
 /*---------------------------------------------------------------------*/
 /* Used for eventNotificationField bit mask in tWFCAElements structure */
 /*---------------------------------------------------------------------*/
@@ -325,6 +339,8 @@ void usart_puthex16(usart_dev* dev, uint16_t value) {
 
 /* eventInfo define for WF_ProcessEvent() when no additional info is supplied */
 #define WF_NO_ADDITIONAL_INFO       ((uint16_t)0xffff)
+
+#define MGMT_RESP_1ST_DATA_BYTE_INDEX       (4)  /* first data byte of Mgmt response starts at index 4 */
 
 #define WF_ASSERT(expr)              \
   do {                               \
@@ -534,6 +550,10 @@ static uint8_t   g_funcFlags = 0x00;
  * flash.
  */
 void wf_chipReset();
+
+BOOL wf_cmIsHostScanAllowed(void);
+
+void wf_cmCheckConnectionState(uint8_t* p_state, uint8_t* p_currentCpId);
 
 void wf_libInitialize();
 
@@ -1902,9 +1922,84 @@ void wf_isr() {
   g_exIntNeedsServicing = TRUE;
 }
 
-void wf_scan() {
- // TODO
+uint16_t wf_scan(uint8_t CpId) {
+  uint8_t hdr[4];
+
+  /* WARNING !!! : 
+   * Host scan is allowed only in idle or connected state. 
+   * If module FW is in the midst of connection ( or reconenction) process, then
+   * host scan can hammer connection process, and furthermore it may cause
+   * fatal failure in module FW operation. To be safte to use host scan, we strongly
+   * recommend you to disable module FW connection manager by uncommenting
+   * #define DISABLE_MODULE_FW_CONNECT_MANAGER_IN_INFRASTRUCTURE    
+   * in WF_Config.h
+   */
+  if (!wf_cmIsHostScanAllowed())
+    return WF_ERROR_OPERATION_CANCELLED;
+
+  hdr[0] = WF_MGMT_REQUEST_TYPE;
+  hdr[1] = WF_SCAN_START_SUBTYPE;
+  hdr[2] = CpId; /* Connection Profile ID */
+  hdr[3] = 0; /* not used              */
+
+  wf_sendMgmtMsg(hdr, sizeof (hdr), NULL, 0);
+
+  /* wait for mgmt response, free it after it comes in (no data needed) */
+  wf_waitForMgmtResponse(WF_SCAN_START_SUBTYPE, FREE_MGMT_BUFFER);
+
+  return WF_SUCCESS;
 }
+
+void wf_scanGetResult(uint8_t listIndex, tWFScanResult* p_scanResult) {
+  uint8_t hdr[4];
+  /* char rssiChan[48]; */ /* reference for how to retrieve RSSI */
+
+  hdr[0] = WF_MGMT_REQUEST_TYPE;
+  hdr[1] = WF_SCAN_GET_RESULTS_SUBTYPE;
+  hdr[2] = listIndex; /* scan result index to read from */
+  hdr[3] = 1; /* number of results to read            */
+
+  wf_sendMgmtMsg(hdr, sizeof (hdr), NULL, 0);
+
+  /* index 4 contains number of scan results returned, index 5 is first byte of first scan result */
+  wf_waitForMgmtResponseAndReadData(WF_SCAN_GET_RESULTS_SUBTYPE, sizeof (tWFScanResult), 5, (uint8_t *) p_scanResult);
+
+  /* fix up endianness on the two 16-bit values in the scan results */
+  p_scanResult->beaconPeriod = WFSTOHS(p_scanResult->beaconPeriod);
+  p_scanResult->atimWindow = WFSTOHS(p_scanResult->atimWindow);
+
+  /* reference for how to retrieve RSSI */
+  /* Display SSID  & Channel */
+  /* sprintf(rssiChan, "  => RSSI: %u, Channel: %u\r\n",  p_scanResult->rssi, p_scanResult->channel);  */
+  /* putsUART(rssiChan); */
+}   
+
+BOOL wf_cmIsHostScanAllowed(void) {
+  uint8_t profileID;
+  uint8_t profileIDState;
+
+  wf_cmCheckConnectionState(&profileIDState, &profileID);
+  if (profileIDState == WF_CSTATE_CONNECTION_IN_PROGRESS || profileIDState == WF_CSTATE_RECONNECTION_IN_PROGRESS)
+    return FALSE;
+
+  return TRUE;
+}
+
+void wf_cmCheckConnectionState(uint8_t* p_state, uint8_t* p_currentCpId) {
+  uint8_t hdrBuf[2];
+  uint8_t msgData[2];
+
+  hdrBuf[0] = WF_MGMT_REQUEST_TYPE;
+  hdrBuf[1] = WF_CM_GET_CONNECTION_STATUS_SUBYTPE;
+
+  wf_sendMgmtMsg(hdrBuf, sizeof (hdrBuf), NULL, 0);
+
+  /* wait for mgmt response, read data, free after read */
+  wf_waitForMgmtResponseAndReadData(WF_CM_GET_CONNECTION_STATUS_SUBYTPE, sizeof (msgData), MGMT_RESP_1ST_DATA_BYTE_INDEX, msgData);
+
+  *p_state = msgData[0]; /* connection state */
+  *p_currentCpId = msgData[1]; /* current CpId     */
+}  
 
 void wf_connect(){
  // TODO

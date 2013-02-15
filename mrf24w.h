@@ -19,7 +19,7 @@ public:
   void end();
   void loop();
   void connect();
-  void scan();
+  void scan(uint8_t cpid);
 
   void setLocalIp(uint8_t localIpAddr[]);
   void setGatewayIp(uint8_t gatewayIpAddr[]);

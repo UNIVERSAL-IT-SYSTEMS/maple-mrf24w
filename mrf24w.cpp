@@ -59,8 +59,8 @@ void Mrf24w::end() {
 
 }
 
-void Mrf24w::scan() {
-  wf_scan();
+void Mrf24w::scan(uint8_t cpid) {
+  wf_scan(cpid);
 }
 
 void Mrf24w::connect() {

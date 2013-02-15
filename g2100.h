@@ -43,13 +43,128 @@ extern "C" {
 #define WF_P2P            3     
 #define WF_SOFT_AP        4     
 
+#define WF_SCAN_ALL ((uint8_t)0xff)
+
+#define WF_MAX_SSID_LENGTH              (32)
+#define WF_BSSID_LENGTH                 (6)
+#define WF_MAX_NUM_RATES                (8)
+
+  /**
+   * Scan Results
+   */
+  typedef struct {
+    uint8_t bssid[WF_BSSID_LENGTH]; // Network BSSID value
+    uint8_t ssid[WF_MAX_SSID_LENGTH]; // Network SSID value
+
+    /**
+      Access point configuration
+      <table>
+        Bit 7       Bit 6       Bit 5       Bit 4       Bit 3       Bit 2       Bit 1       Bit 0
+        -----       -----       -----       -----       -----       -----       -----       -----
+        WPA2        WPA         Preamble    Privacy     Reserved    Reserved    Reserved    IE
+      </table>
+      
+      <table>
+      IE        1 if AP broadcasting one or more Information Elements, else 0
+      Privacy   0 : AP is open (no security)
+                 1: AP using security,  if neither WPA and WPA2 set then security is WEP.
+      Preamble  0: AP transmitting with short preamble
+                 1: AP transmitting with long preamble
+      WPA       Only valid if Privacy is 1.
+                 0: AP does not support WPA
+                 1: AP supports WPA
+      WPA2      Only valid if Privacy is 1.
+                 0: AP does not support WPA2
+                 1: AP supports WPA2
+      </table>
+     */
+    uint8_t apConfig;
+    uint8_t reserved;
+    uint16_t beaconPeriod; // Network beacon interval          
+    uint16_t atimWindow; // Only valid if bssType = WF_INFRASTRUCTURE
+
+    /**
+      List of Network basic rates.  Each rate has the following format:
+      
+      Bit 7
+     * 0 � rate is not part of the basic rates set
+     * 1 � rate is part of the basic rates set
+
+      Bits 6:0 
+      Multiple of 500kbps giving the supported rate.  For example, a value of 2 
+      (2 * 500kbps) indicates that 1mbps is a supported rate.  A value of 4 in 
+      this field indicates a 2mbps rate (4 * 500kbps).
+     */
+    uint8_t basicRateSet[WF_MAX_NUM_RATES];
+    uint8_t rssi; // Signal strength of received frame beacon or probe response
+    uint8_t numRates; // Number of valid rates in basicRates
+    uint8_t DtimPeriod; // Part of TIM element
+    uint8_t bssType; // WF_INFRASTRUCTURE or WF_ADHOC
+    uint8_t channel; // Channel number
+    uint8_t ssidLen; // Number of valid characters in ssid
+
+  } tWFScanResult;
 
   void wf_init();
   void wf_isr();
-  void wf_scan();
+
+  /**
+   * /brief Commands the MRF24W to start a scan operation.  This will generate the WF_EVENT_SCAN_RESULTS_READY event.
+   * 
+   * Directs the MRF24W to initiate a scan operation utilizing the input 
+   * Connection Profile ID.  The Host Application will be notified that the scan 
+   * results are ready when it receives the WF_EVENT_SCAN_RESULTS_READY event.  
+   * The eventInfo field for this event will contain the number of scan results.  
+   * Once the scan results are ready they can be retrieved with 
+   * WF_ScanGetResult().
+   * 
+   * Scan results are retained on the MRF24W until:
+   * 1.  Calling WF_Scan() again (after scan results returned from previous call).
+   * 2.  MRF24W reset.
+   * 
+   * @param cpid Connection Profile to use.
+   *             If the CpId is valid then the values from that Connection Profile 
+   *             will be used for filtering scan results.  If the CpId is set to 
+   *             WF_SCAN_ALL (0xFF) then a default filter will be used.
+   * 
+   *             Valid CpId
+   *             * If CP has a defined SSID only scan results with that SSID are 
+   *                retained.  
+   *             * If CP does not have a defined SSID then all scanned SSID�s will be 
+   *                retained
+   *             * Only scan results from Infrastructure or AdHoc networks are 
+   *                retained, depending on the value of networkType in the Connection Profile
+   *             * The channel list that is scanned will be determined from 
+   *                channelList in the Connection Algorithm (which must be defined 
+   *                before calling this function).
+   * 
+   *             CpId is equal to WF_SCAN_ALL
+   *             * All scan results are retained (both Infrastructure and Ad Hoc 
+   *                networks).
+   *             * All channels within the MRF24W�s regional domain will be 
+   *                scanned.
+   *             * No Connection Profiles need to be defined before calling this 
+   *                function.
+   *             * The Connection Algorithm does not need to be defined before 
+   *                calling this function.
+   */
+  uint16_t wf_scan(uint8_t cpid);
+
+  /**
+   * /brief Read scan results back from MRF24W.
+   * 
+   * After a scan has completed this function is used to read one or more of the 
+   *     scan results from the MRF24W.  The scan results will be written 
+   *     contiguously starting at p_scanResults (see tWFScanResult structure for 
+   *     format of scan result).    
+   * @param listIndex Index (0-based list) of the scan entry to retrieve
+   * @param p_scanResult Pointer to location to store the scan result structure
+   */
+  void wf_scanGetResult(uint8_t listIndex, tWFScanResult* p_scanResult);
+
   void wf_connect();
   void wf_getMacAddress(uint8_t* buf);
-  
+
 #ifdef __cplusplus
 }
 #endif
