@@ -24,6 +24,14 @@ void Mrf24w_wf_hook_on_connected(void* userData, uint8_t connected) {
   }
 }
 
+extern "C" void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) {
+  Serial1.print("wf_processEvent: ");
+  Serial1.print(event);
+  Serial1.print(", ");
+  Serial1.print(eventInfo);
+  Serial1.println();
+}
+
 Mrf24w::Mrf24w(HardwareSPI &spi, uint8_t csPin, uint8_t intPin) : m_csPin(csPin), m_intPin(intPin), m_connectedFn(NULL) {
   const stm32_pin_info *csPinInfo = &PIN_MAP[csPin];
 

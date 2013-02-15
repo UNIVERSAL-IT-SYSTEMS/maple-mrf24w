@@ -8,12 +8,13 @@
 #include "delay.h"
 
 #include <libmaple/usart.h>
+#include <libmaple/systick.h>
 
 #define BOOL  uint8_t
 #define FALSE 0
 #define TRUE  1
 
-void usart_puthex4(uint8_t value) {
+void usart_puthex4(usart_dev* dev, uint8_t value) {
   char ch;
   value = value & 0xf;
   if (value > 10) {
@@ -21,28 +22,57 @@ void usart_puthex4(uint8_t value) {
   } else {
     ch = value + '0';
   }
-  usart_putc(USART1, ch);
+  usart_putc(dev, ch);
 }
 
-void usart_puthex8(uint8_t value) {
-  usart_putc(USART1, ' ');
-  usart_putc(USART1, '0');
-  usart_putc(USART1, 'x');
-  usart_puthex4(value >> 4);
-  usart_puthex4(value >> 0);
-  usart_putc(USART1, ' ');
+void usart_puthex8(usart_dev* dev, uint8_t value) {
+  usart_putc(dev, ' ');
+  usart_putc(dev, '0');
+  usart_putc(dev, 'x');
+  usart_puthex4(dev, value >> 4);
+  usart_puthex4(dev, value >> 0);
+  usart_putc(dev, ' ');
 }
 
-void usart_puthex16(uint16_t value) {
-  usart_putc(USART1, ' ');
-  usart_putc(USART1, '0');
-  usart_putc(USART1, 'x');
-  usart_puthex4(value >> 12);
-  usart_puthex4(value >> 8);
-  usart_puthex4(value >> 4);
-  usart_puthex4(value >> 0);
-  usart_putc(USART1, ' ');
+void usart_puthex16(usart_dev* dev, uint16_t value) {
+  usart_putc(dev, ' ');
+  usart_putc(dev, '0');
+  usart_putc(dev, 'x');
+  usart_puthex4(dev, value >> 12);
+  usart_puthex4(dev, value >> 8);
+  usart_puthex4(dev, value >> 4);
+  usart_puthex4(dev, value >> 0);
+  usart_putc(dev, ' ');
 }
+
+/*--------------------*/
+/* Endianness defines */
+/*--------------------*/
+#define WF_BIG_ENDIAN                   (0)
+#define WF_LITTLE_ENDIAN                (1)
+
+/* Indicate whether the Host CPU is big-endian or little-endian */
+#define HOST_CPU_ENDIANNESS             WF_LITTLE_ENDIAN    /* WF_BIG_ENDIAN or WF_LITTLE_ENDIAN */
+
+/*-------------------*/
+/* Endianness Macros */
+/*-------------------*/
+/* if the Host CPU is Little Endian, which does not match the MRF24W */
+#if (HOST_CPU_ENDIANNESS == WF_LITTLE_ENDIAN)
+/* 32-bit data type conversion */
+#define HTOWFL(a) (((a & 0x000000ff) << 24) | ((a & 0x0000ff00) << 8) | ((a & 0x00ff0000) >> 8) | ((a & 0xff000000) >> 24))
+#define WFTOHL(a) HTOWFL(a)
+
+/* 16-bit data type conversion */
+#define HSTOWFS(a) (((a) << 8) | ((a) >> 8))
+#define WFSTOHS(a) HSTOWFS(a)
+/* else Host CPU is Big-Endian, which matches the MRF24W */
+#else
+#define HTOWFL(a)   (a)
+#define WFTOHL(a)   (a)    
+#define HSTOWFS(a)  (a)
+#define WFSTOHS(a)  (a)
+#endif
 
 #define MRF24WB0M_DEVICE  (1)
 #define MRF24WG0M_DEVICE  (2)
@@ -51,6 +81,13 @@ void usart_puthex16(uint16_t value) {
 #define WF_WRITE_REGISTER_MASK         ((uint8_t)(0x00))
 
 #define WF_MAC_ADDRESS_LENGTH            (6)
+
+/* this block of defines is used to check illegal reentry when in WF API functions */
+#define WF_ENTERING_FUNCTION    (1)
+#define WF_LEAVING_FUNCTION     (0)
+
+/* bit masks for functions that need to be tracked when they are called */
+#define WF_PROCESS_EVENT_FUNC   ((uint8_t)0x01)
 
 /*------------------------------------------------------------------------------*/
 /* These are error codes returned in the result field of a management response. */
@@ -98,6 +135,16 @@ void usart_puthex16(uint16_t value) {
 #define WF_ERROR_CONNECTION_TERMINATED                          ((uint16_t)41)
 #define WF_ERROR_HOST_SCAN_NOT_ALLOWED                          ((uint16_t)42)
 #define WF_ERROR_INVALID_WPS_PIN                                ((uint16_t)44)
+
+/*---------------------------------------------------------------------*/
+/* Used for eventNotificationField bit mask in tWFCAElements structure */
+/*---------------------------------------------------------------------*/
+#define WF_NOTIFY_CONNECTION_ATTEMPT_SUCCESSFUL     ((uint8_t)(0x01))  
+#define WF_NOTIFY_CONNECTION_ATTEMPT_FAILED         ((uint8_t)(0x02))  
+#define WF_NOTIFY_CONNECTION_TEMPORARILY_LOST       ((uint8_t)(0x04))  
+#define WF_NOTIFY_CONNECTION_PERMANENTLY_LOST       ((uint8_t)(0x08))  
+#define WF_NOTIFY_CONNECTION_REESTABLISHED          ((uint8_t)(0x10))  
+#define WF_NOTIFY_ALL_EVENTS                        ((uint8_t)(0x1f))
 
 /*--------------------------------*/
 /* MRF24W 8-bit Host Registers    */
@@ -157,6 +204,10 @@ void usart_puthex16(uint16_t value) {
 
 #define RAW_ID_0                        (0)
 #define RAW_ID_1                        (1)
+#define RAW_ID_2                        (2)
+#define RAW_ID_3                        (3)
+#define RAW_ID_4                        (4)
+#define RAW_ID_5                        (5)
 
 // RAW0 used for Rx, RAW1 used for Tx
 #define RAW_RX_ID                       RAW_ID_0
@@ -176,6 +227,34 @@ void usart_puthex16(uint16_t value) {
 #define RAW_SCRATCH_POOL                (0x30)   /* Scratch object                                 */
 #define RAW_STACK_MEM                   (0x40)   /* single level stack to save state of RAW        */
 #define RAW_COPY                        (0x70)   /* RAW to RAW copy                                */
+
+/* Usage of RAW Windows */
+#define RAW_DATA_RX_ID                  RAW_ID_0
+#define RAW_DATA_TX_ID                  RAW_ID_1
+#define RAW_MGMT_RX_ID                  RAW_ID_2
+#define RAW_MGMT_TX_ID                  RAW_ID_3
+#define RAW_SCRATCH_ID                  RAW_ID_4
+#define RAW_UNUSED_ID                   RAW_ID_5
+
+/*-------------------------------------------*/
+/* Connection Manager Event Message Subtypes */
+/* (Used in Mgmt Indicate messages)          */
+/*-------------------------------------------*/
+#define WF_EVENT_CONNECTION_ATTEMPT_STATUS_SUBTYPE   (6)  
+#define WF_EVENT_CONNECTION_LOST_SUBTYPE             (7)
+#define WF_EVENT_CONNECTION_REESTABLISHED_SUBTYPE    (8)
+#define WF_EVENT_KEY_CALCULATION_REQUEST_SUBTYPE     (9)
+#define WF_EVENT_SCAN_RESULTS_READY_SUBTYPE          (11)
+#define WF_EVENT_SCAN_IE_RESULTS_READY_SUBTYPE       (12)
+
+/* event values for index 2 of WF_CONNECTION_ATTEMPT_STATUS_EVENT_SUBTYPE */
+#define CONNECTION_ATTEMPT_SUCCESSFUL    ((uint8_t)1) /**< if not 1 then failed to connect and info field is error code */
+#define CONNECTION_ATTEMPT_FAILED        ((uint8_t)2)
+
+/* event values for index 2 of WF_EVENT_CONNECTION_LOST_SUBTYPE */
+#define CONNECTION_TEMPORARILY_LOST      ((uint8_t)1)
+#define CONNECTION_PERMANENTLY_LOST      ((uint8_t)2)
+#define CONNECTION_REESTABLISHED         ((uint8_t)3)   
 
 /* 8-bit RAW registers */
 #define RAW_0_DATA_REG                  (0x20)
@@ -217,7 +296,36 @@ void usart_puthex16(uint16_t value) {
 #define MULTICAST_ADDRESS                   (6)
 #define ADDRESS_FILTER_DEACTIVATE           (0)
 
-extern void wf_assertionFailed(uint16_t lineNumber);
+/*----------------------------------------------------------------------------*/
+/* Events that can be invoked in WF_ProcessEvent().  Note that the            */
+/* connection events are optional, all other events the app must be notified. */
+/*----------------------------------------------------------------------------*/
+
+#define WF_EVENT_CONNECTION_SUCCESSFUL           (1)   /**< Connection attempt to network successful            */
+#define WF_EVENT_CONNECTION_FAILED               (2)   /**< Connection attempt failed                           */
+
+
+#define WF_EVENT_CONNECTION_TEMPORARILY_LOST     (3)   /**< Connection lost; MRF24W attempting to reconnect     */
+#define WF_EVENT_CONNECTION_PERMANENTLY_LOST     (4)   /**< Connection lost; MRF24W no longer trying to connect */  
+#define WF_EVENT_CONNECTION_REESTABLISHED        (5)
+
+#define WF_EVENT_FLASH_UPDATE_SUCCESSFUL         (6)   /**< Update to FLASH successful                          */
+#define WF_EVENT_FLASH_UPDATE_FAILED             (7)   /**< Update to FLASH failed                              */
+
+
+
+#define WF_EVENT_KEY_CALCULATION_REQUEST         (8)   /**< Key calculation is required                       */
+
+#define WF_EVENT_SCAN_RESULTS_READY              (9)   /**< scan results are ready                              */ 
+#define WF_EVENT_IE_RESULTS_READY                (10)  /**< IE data ready                                       */
+
+
+#define WF_EVENT_RX_PACKET_RECEIVED              (11)  /**< Rx data packet has been received by MRF24W          */
+#define WF_EVENT_INVALID_WPS_PIN                 (12)  /**< Invalid WPS pin was entered                            */
+
+/* eventInfo define for WF_ProcessEvent() when no additional info is supplied */
+#define WF_NO_ADDITIONAL_INFO       ((uint16_t)0xffff)
+
 #define WF_ASSERT(expr)              \
   do {                               \
     if (!(expr)) {                   \
@@ -359,8 +467,19 @@ typedef struct mgmtRxHdrStruct {
   uint8_t subtype; /* mgmt msg subtype             */
   uint8_t result; /* 1 if success, else failure   */
   uint8_t macState; /* not used                     */
-
 } tMgmtMsgRxHdr;
+
+typedef struct mgmtIndicateHdrStruct {
+  uint8_t type; /**< always WF_MGMT_INDICATE_MSG_TYPE (2) */
+  uint8_t subType; /**< event type                           */
+} tMgmtIndicateHdr;
+
+typedef struct mgmtIndicatePassphraseReady {
+  uint8_t keyLen;
+  uint8_t key[64];
+  uint8_t ssidLen;
+  uint8_t ssid[32];
+} tMgmtIndicatePassphraseReady;   
 
 /*----------------------------------------------------------------------------------------*/
 /* Global variables                                                                       */
@@ -369,8 +488,13 @@ extern spi_dev*  wf_spi;
 extern gpio_dev* wf_cs_port;
 extern uint8_t   wf_cs_bit;
 
+extern void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
+
 static uint8_t   g_buf[3];
 static uint8_t   g_hostIntSaved = 0;
+static uint8_t   g_eintHostIntRegValue;
+static uint8_t   g_eintHostIntMaskRegValue;
+static uint8_t   g_eintHostInt;
 static BOOL      g_psPollActive = FALSE;     
 static BOOL      g_wasDiscarded;
 static uint16_t  g_sizeofScratchMemory = 0;
@@ -379,7 +503,7 @@ static uint16_t  g_encIndex[2]; /**< index 0 stores current ENC read index, inde
 static uint16_t  g_rxBufferSize;
 static uint16_t  g_txPacketLength;
 static BOOL      g_txBufferFlushed;
-extern BOOL      g_hostRAWDataPacketReceived;
+static BOOL      g_hostRAWDataPacketReceived = FALSE;
 static BOOL      g_rawWindowReady[2]; /**< for Tx and Rx, TRUE = ready for use, FALSE = not ready for use */
 static uint8_t   g_rawWindowState[2]; /**< see RAW Window states above                                    */
 static BOOL      g_rxIndexSetBeyondBuffer; /**< TODO debug -- remove after test */
@@ -389,9 +513,14 @@ static volatile BOOL g_mgmtConfirmMsgReceived = FALSE;
 static BOOL      g_restoreRxData = FALSE;
 static uint8_t   g_waitingForMgmtResponse = FALSE;
 static BOOL      g_mgmtRxInProgress = FALSE;
-static BOOL      g_mgmtReadMsgReady; /**< TRUE if rx mgmt msg to process, else FALSE              */
+static BOOL      g_mgmtReadMsgReady = FALSE; /**< TRUE if rx mgmt msg to process, else FALSE              */
 static BOOL      g_mgmtAppWaiting = FALSE;
-static volatile BOOL g_exIntNeedsServicing; /**< TRUE if external interrupt needs processing, else FALSE */
+static volatile BOOL g_exIntNeedsServicing = FALSE; /**< TRUE if external interrupt needs processing, else FALSE */
+static BOOL      g_wiFiConnectionChanged = FALSE;
+static BOOL      g_wiFiConnection = FALSE;
+static BOOL      g_logicalConnection = FALSE;
+static uint8_t   g_eventNotificationAction = WF_NOTIFY_ALL_EVENTS;
+static uint8_t   g_funcFlags = 0x00;  
 
 /*----------------------------------------------------------------------------------------*/
 /* Function declarations                                                                  */
@@ -672,6 +801,11 @@ void wf_getDeviceInfo(tWFDeviceInfo* p_deviceInfo);
 void wf_sendMgmtMsg(uint8_t* p_header, uint8_t headerLength, uint8_t* p_data, uint8_t dataLength);
 
 /**
+ * Macro used to determine is application is trying to send a management when in the driver function WF_ProcessEvent().                                                                                 
+ */
+#define wf_isInWFProcessEvent()    ((g_funcFlags & WF_PROCESS_EVENT_FUNC) > 0)
+
+/**
  * Called form main loop to support 802.11 operations
  */
 void wf_macProcess(void);
@@ -718,6 +852,36 @@ void wf_deallocateDataTxBuffer(void);
 
 BOOL wf_allocateMgmtTxBuffer(uint16_t bytesNeeded);
 
+BOOL wf_isNotifyApp(uint8_t event);
+
+/**
+ * Determines if the input event it enabled in the notify mask
+ * @param notifyMask the bit mask of events the application wishes to be notified of
+ * @param notifyBit the specific event that occurred
+ * @return TRUE if the notify bit is set in the notify mask
+ */
+BOOL wf_isEventNotifyBitSet(uint8_t notifyMask, uint8_t notifyBit);
+
+/**
+ * /brief Gets the event notification mask.
+ * 
+ * Gets the event notification mask for the Connection Algorithm.  Retruned
+ *  values are:
+ * 
+ *  <table>
+ *      Value   Event
+ *      -----   -----
+ *      0x01    WF_NOTIFY_CONNECTION_ATTEMPT_SUCCESSFUL
+ *      0x02    WF_NOTIFY_CONNECTION_ATTEMPT_FAILED
+ *      0x04    WF_NOTIFY_CONNECTION_TEMPORARILY_LOST
+ *      0x08    WF_NOTIFY_CONNECTION_PERMANENTLY_LOST
+ *      0x10    WF_NOTIFY_CONNECTION_REESTABLISHED
+ *      0x1f    WF_NOTIFY_ALL_EVENTS
+ *  </table>
+ * @return A UINT8 of the event notification bit mask.
+ */
+uint8_t wf_getEventNotificationMask(void);
+
 /**
  * /brief Pops a RAW window state from the 1-level deep RAW stack.  The RAW window state that was 
  *               mounted prior to this call is lost.
@@ -748,6 +912,26 @@ BOOL wf_rawSetIndex(uint16_t rawId, uint8_t index);
 BOOL wf_rawGetMgmtRxBuffer(uint16_t* p_numBytes);
 
 void wf_processMgmtRxMsg(void);
+
+/**
+ * Called by ProcessMgmtRxMsg when a mgmt confirm has been received.  
+ *           This function then sets a local flag for this module indicating 
+ *           the event.
+ */
+void wf_signalMgmtConfirmReceivedEvent(void);
+
+/**
+ * Processes a management indicate message
+ */
+void wf_processMgmtIndicateMsg();
+
+void wf_signalWiFiConnectionChanged(BOOL state);
+
+void wf_setLogicalConnectionState(BOOL state);
+
+void wf_setRawRxMgmtInProgress(BOOL action);
+
+void wf_assertionFailed(uint16_t lineNumber);
 
 /***************************************************************************************************/
 
@@ -909,6 +1093,12 @@ void wf_setRawRxMgmtInProgress(BOOL action) {
   g_mgmtRxInProgress = action;
 }
 
+void wf_assertionFailed(uint16_t lineNumber) {
+  usart_putstr(USART1, "wf_assertionFailed: ");
+  usart_putudec(USART1, lineNumber);
+  usart_putc(USART1, '\n');
+}
+
 void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
   tMgmtMsgRxHdr hdr;
 
@@ -1067,6 +1257,203 @@ void wf_processMgmtRxMsg(void) {
   }
 }
 
+void wf_signalMgmtConfirmReceivedEvent(void) {
+  g_mgmtConfirmMsgReceived = TRUE;
+}    
+
+void wf_processMgmtIndicateMsg() {
+  tMgmtIndicateHdr hdr;
+  uint8_t buf[6];
+  uint8_t event = 0xff;
+  uint16_t eventInfo;
+  tMgmtIndicatePassphraseReady passphraseReady;
+
+  /* read 2-byte header of management message */
+  wf_rawRead(RAW_MGMT_RX_ID, 0, sizeof (tMgmtIndicateHdr), (uint8_t *) & hdr);
+
+  /* Determine which event occurred and handle it */
+  switch (hdr.subType) {
+      /*-----------------------------------------------------------------*/
+    case WF_EVENT_CONNECTION_ATTEMPT_STATUS_SUBTYPE:
+      /*-----------------------------------------------------------------*/
+#if defined(MRF24WG)
+      /* There is one data byte with this message */
+      RawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr), 2, buf); /* read first 2 bytes after header */
+      /* if connection attempt successful */
+      if (buf[0] == CONNECTION_ATTEMPT_SUCCESSFUL) {
+        event = WF_EVENT_CONNECTION_SUCCESSFUL;
+        eventInfo = WF_NO_ADDITIONAL_INFO;
+        SignalWiFiConnectionChanged(TRUE);
+#if defined (STACK_USE_DHCP_CLIENT)
+        RenewDhcp();
+#endif
+        SetLogicalConnectionState(TRUE);
+      }        /* else connection attempt failed */
+      else {
+        event = WF_EVENT_CONNECTION_FAILED;
+        eventInfo = (UINT16) (buf[0] << 8 | buf[1]); /* contains connection failure code */
+        SetLogicalConnectionState(FALSE);
+      }
+
+#else    /* !defined(MRF24WG) */
+      /* There is one data byte with this message */
+      wf_rawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr), 1, buf); /* read first byte after header */
+      /* if connection attempt successful */
+      if (buf[0] == CONNECTION_ATTEMPT_SUCCESSFUL) {
+        event = WF_EVENT_CONNECTION_SUCCESSFUL;
+        eventInfo = WF_NO_ADDITIONAL_INFO;
+        wf_signalWiFiConnectionChanged(TRUE);
+#if defined (STACK_USE_DHCP_CLIENT)
+        RenewDhcp();
+#endif
+        wf_setLogicalConnectionState(TRUE);
+      }        /* else connection attempt failed */
+      else {
+        event = WF_EVENT_CONNECTION_FAILED;
+        eventInfo = (uint16_t) buf[0]; /* contains connection failure code */
+        wf_setLogicalConnectionState(FALSE);
+      }
+#endif    /* defined(MRF24WG) */
+      break;
+
+      /*-----------------------------------------------------------------*/
+    case WF_EVENT_CONNECTION_LOST_SUBTYPE:
+      /*-----------------------------------------------------------------*/
+      /* read index 2 and 3 from message and store in buf[0] and buf[1]
+         buf[0] -- 1: Connection temporarily lost  2: Connection permanently lost 3: Connection Reestablished 
+         buf[1] -- 0: Beacon Timeout  1: Deauth from AP  */
+      wf_rawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr), 2, buf);
+
+      if (buf[0] == CONNECTION_TEMPORARILY_LOST) {
+        event = WF_EVENT_CONNECTION_TEMPORARILY_LOST;
+        eventInfo = (uint16_t) buf[1]; /* lost due to beacon timeout or deauth */
+        wf_signalWiFiConnectionChanged(FALSE);
+      } else if (buf[0] == CONNECTION_PERMANENTLY_LOST) {
+        event = WF_EVENT_CONNECTION_PERMANENTLY_LOST;
+        eventInfo = (uint16_t) buf[1]; /* lost due to beacon timeout or deauth */
+        wf_setLogicalConnectionState(FALSE);
+        wf_signalWiFiConnectionChanged(FALSE);
+      } else if (buf[0] == CONNECTION_REESTABLISHED) {
+        event = WF_EVENT_CONNECTION_REESTABLISHED;
+        eventInfo = (uint16_t) buf[1]; /* originally lost due to beacon timeout or deauth */
+#if defined(STACK_USE_DHCP_CLIENT)
+        RenewDhcp();
+#endif
+        wf_signalWiFiConnectionChanged(TRUE);
+        wf_setLogicalConnectionState(TRUE);
+      }
+      else {
+        /* invalid parameter in message */
+        WF_ASSERT(FALSE);
+      }
+      break;
+
+      /*-----------------------------------------------------------------*/
+    case WF_EVENT_SCAN_RESULTS_READY_SUBTYPE:
+      /*-----------------------------------------------------------------*/
+      /* read index 2 of mgmt indicate to get the number of scan results */
+      wf_rawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr), 1, buf);
+      event = WF_EVENT_SCAN_RESULTS_READY;
+      eventInfo = (uint16_t) buf[0]; /* number of scan results */
+      break;
+
+      /*-----------------------------------------------------------------*/
+    case WF_EVENT_SCAN_IE_RESULTS_READY_SUBTYPE:
+      /*-----------------------------------------------------------------*/
+      event = WF_EVENT_IE_RESULTS_READY;
+      /* read indexes 2 and 3 containing the 16-bit value of IE bytes */
+      wf_rawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr), 2, (uint8_t *) & eventInfo);
+      eventInfo = WFSTOHS(eventInfo); /* fix endianess of 16-bit value */
+      break;
+
+#if defined(MRF24WG)
+    case WF_EVENT_KEY_CALCULATION_REQUEST_SUBTYPE:
+      event = WF_EVENT_KEY_CALCULATION_REQUEST;
+      RawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr),
+              sizeof (tMgmtIndicatePassphraseReady), (UINT8 *) & passphraseReady);
+      break;
+#endif
+
+      /*-----------------------------------------------------------------*/
+    default:
+      /*-----------------------------------------------------------------*/
+      WF_ASSERT(FALSE);
+      break;
+  }
+
+  /* free mgmt buffer */
+  wf_deallocateMgmtRxBuffer();
+
+  /* if the application wants to be notified of the event */
+  if (wf_isNotifyApp(event)) {
+    wf_processEvent(event, eventInfo, (uint8_t *) &passphraseReady);
+  }
+}
+
+BOOL wf_isEventNotifyBitSet(uint8_t notifyMask, uint8_t notifyBit) {
+  /* check if the event notify bit is set */
+  return ((notifyMask & notifyBit) > 0);
+}
+
+uint8_t wf_getEventNotificationMask(void) {
+  return g_eventNotificationAction;
+}
+
+BOOL wf_isNotifyApp(uint8_t event) {
+  BOOL notify = FALSE;
+  uint8_t notifyMask;
+
+  notifyMask = wf_getEventNotificationMask();
+
+  /* determine if user wants to be notified of event */
+  switch (event) {
+    case WF_EVENT_CONNECTION_SUCCESSFUL:
+      if (wf_isEventNotifyBitSet(notifyMask, WF_NOTIFY_CONNECTION_ATTEMPT_SUCCESSFUL)) {
+        notify = TRUE;
+      }
+      break;
+
+    case WF_EVENT_CONNECTION_FAILED:
+      if (wf_isEventNotifyBitSet(notifyMask, WF_NOTIFY_CONNECTION_ATTEMPT_FAILED)) {
+        notify = TRUE;
+      }
+      break;
+
+    case WF_EVENT_CONNECTION_TEMPORARILY_LOST:
+      if (wf_isEventNotifyBitSet(notifyMask, WF_NOTIFY_CONNECTION_TEMPORARILY_LOST)) {
+        notify = TRUE;
+      }
+      break;
+
+    case WF_EVENT_CONNECTION_PERMANENTLY_LOST:
+      if (wf_isEventNotifyBitSet(notifyMask, WF_NOTIFY_CONNECTION_PERMANENTLY_LOST)) {
+        notify = TRUE;
+      }
+      break;
+
+    case WF_EVENT_CONNECTION_REESTABLISHED:
+      if (wf_isEventNotifyBitSet(notifyMask, WF_NOTIFY_CONNECTION_REESTABLISHED)) {
+        notify = TRUE;
+      }
+      break;
+
+    default:
+      notify = TRUE; /* the app gets notified of all other events */
+      break;
+  }
+
+  return notify;
+}  
+
+void wf_signalWiFiConnectionChanged(BOOL state) {
+  g_wiFiConnectionChanged = TRUE;
+  g_wiFiConnection = state;
+}
+
+void wf_setLogicalConnectionState(BOOL state) {
+  g_logicalConnection = state;
+}
+
 BOOL wf_rawGetMgmtRxBuffer(uint16_t* p_numBytes) {
   BOOL res = TRUE;
   // UINT16  numBytes;
@@ -1174,7 +1561,7 @@ BOOL wf_rawSetIndex(uint16_t rawId, uint8_t index) {
   regId = (rawId == RAW_ID_0) ? RAW_0_INDEX_REG : RAW_1_INDEX_REG;
   wf_write16BitWFRegister(regId, index);
 
-  startTickCount = millis();
+  startTickCount = systick_uptime();
   maxAllowedTicks = 5 * 1000; /* 5ms */
 
   regId = (rawId == RAW_ID_0) ? RAW_0_STATUS_REG : RAW_1_STATUS_REG;
@@ -1187,7 +1574,7 @@ BOOL wf_rawSetIndex(uint16_t rawId, uint8_t index) {
 
     /* if timed out then trying to set index past end of raw window, which is OK so long as the app */
     /* doesn't try to access it                                                                     */
-    if (millis() - startTickCount >= maxAllowedTicks) {
+    if (systick_uptime() - startTickCount >= maxAllowedTicks) {
       return FALSE; /* timed out waiting for Raw set index to complete */
     }
   }
@@ -1198,7 +1585,7 @@ void wf_sendMgmtMsg(uint8_t* p_header, uint8_t headerLength, uint8_t* p_data, ui
   uint32_t maxAllowedTime;
 
   /* cannot send management messages while in WF_ProcessEvent() */
-  WF_ASSERT(!wf_sInWFProcessEvent());
+  WF_ASSERT(!wf_isInWFProcessEvent());
 
   wf_ensureWFisAwake();
 
@@ -1211,12 +1598,12 @@ void wf_sendMgmtMsg(uint8_t* p_header, uint8_t headerLength, uint8_t* p_data, ui
 
   /* mounts a tx mgmt buffer on the MRF24W when data tx is done */
   maxAllowedTime = 5 * 1000; /* 5 ms timeout */
-  startTime = millis();
+  startTime = systick_uptime();
   while (!wf_isTxMgmtReady()) {
     wf_macProcess();
 
     /* DEBUG -- REMOVE AFTER FIGURE OUT WHY TIMING OUT (RARELY HAPPENS) */
-    if (millis() - startTime >= maxAllowedTime) {
+    if (systick_uptime() - startTime >= maxAllowedTime) {
       /* force flags so WFisTxMgmtReady will return TRUE */
       wf_setRawWindowState(RAW_TX_ID, WF_RAW_UNMOUNTED);
       g_rawWindowReady[RAW_TX_ID] = FALSE;
@@ -1472,7 +1859,47 @@ void wf_rawInit() {
 }
 
 void wf_isr() {
- // TODO
+  /*--------------------------------------------------------*/
+  /* if driver is waiting for a RAW Move Complete interrupt */
+  /*--------------------------------------------------------*/
+  if (g_rawMoveState.waitingForRawMoveCompleteInterrupt) {
+    /* read hostInt register and hostIntMask register to determine cause of interrupt */
+    g_eintHostIntRegValue = wf_read8BitWFRegister(WF_HOST_INTR_REG);
+    g_eintHostIntMaskRegValue = wf_read8BitWFRegister(WF_HOST_MASK_REG);
+
+    // AND the two registers together to determine which active, enabled interrupt has occurred
+    g_eintHostInt = g_eintHostIntRegValue & g_eintHostIntMaskRegValue;
+
+    /* if a RAW0 or RAW1 interrupt occurred, signifying RAW Move completed */
+    if (g_eintHostInt & (WF_HOST_INT_MASK_RAW_0_INT_0 | WF_HOST_INT_MASK_RAW_1_INT_0)) {
+      /* save the copy of the active interrupts */
+      g_rawMoveState.rawInterrupt = g_eintHostInt;
+      g_rawMoveState.waitingForRawMoveCompleteInterrupt = FALSE;
+
+      /* if no other interrupts occurred other than a RAW0 or RAW1 interrupt */
+      if ((g_eintHostInt & ~(WF_HOST_INT_MASK_RAW_0_INT_0 | WF_HOST_INT_MASK_RAW_1_INT_0)) == 0u) {
+        /* clear the RAW interrupts, re-enable interrupts, and exit */
+        wf_write8BitWFRegister(WF_HOST_INTR_REG, (WF_HOST_INT_MASK_RAW_0_INT_0 | WF_HOST_INT_MASK_RAW_1_INT_0));
+        // TODO: WF_EintEnable();
+        return;
+      }        /* else we got a RAW0 or RAW1 interrupt, but, there is also at least one other interrupt present */
+      else {
+        // save the other interrupts and clear them for now
+        // keep interrupts disabled
+        g_hostIntSaved |= (g_eintHostInt & ~(WF_HOST_INT_MASK_RAW_0_INT_0 | WF_HOST_INT_MASK_RAW_1_INT_0));
+        wf_write8BitWFRegister(WF_HOST_INTR_REG, g_eintHostInt);
+      }
+    } else { /* else we did not get a RAW interrupt, but we did get at least one other interrupt */
+      g_hostIntSaved |= g_eintHostInt;
+      wf_write8BitWFRegister(WF_HOST_INTR_REG, g_eintHostInt);
+      // TODO: WF_EintEnable();
+    }
+  }
+
+  // Once we're in here, external interrupts have already been disabled so no need to call WF_EintDisable() in here
+
+  /* notify state machine that an interrupt occurred */
+  g_exIntNeedsServicing = TRUE;
 }
 
 void wf_scan() {
