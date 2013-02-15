@@ -18,6 +18,8 @@ public:
   void begin();
   void end();
   void loop();
+  void connect();
+  void scan();
 
   void setLocalIp(uint8_t localIpAddr[]);
   void setGatewayIp(uint8_t gatewayIpAddr[]);
@@ -36,7 +38,7 @@ private:
   uint8_t m_intPin;
   Mrf24wConnectedFn m_connectedFn;
 
-  friend void Mrf24w_zg_hook_on_connected(void* userData, uint8_t connected);
+  friend void Mrf24w_wf_hook_on_connected(void* userData, uint8_t connected);
 
   void connected(uint8_t connected);
 };
