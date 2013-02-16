@@ -139,6 +139,8 @@ extern "C" {
 
   } tWFScanResult;
 
+  extern uint8_t wf_connected;
+  
   extern void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
 
   void wf_init();
@@ -208,6 +210,11 @@ extern "C" {
 
   void wf_connect();
   void wf_getMacAddress(uint8_t* buf);
+
+  /**
+   * Called form main loop to support 802.11 operations
+   */
+  void wf_macProcess(void);
 
 #ifdef __cplusplus
 }

@@ -10,6 +10,9 @@
 #include <libmaple/usart.h>
 #include <libmaple/systick.h>
 
+#define WF_DEBUG
+#define WF_OUTPUT_RAW_TX_RX
+
 #define BOOL  uint8_t
 #define FALSE 0
 #define TRUE  1
@@ -470,6 +473,8 @@ extern spi_dev*  wf_spi;
 extern gpio_dev* wf_cs_port;
 extern uint8_t   wf_cs_bit;
 
+uint8_t wf_connected = FALSE;
+
 static uint8_t   g_buf[3];
 static uint8_t   g_hostIntSaved = 0;
 static uint8_t   g_eintHostIntRegValue;
@@ -497,7 +502,6 @@ static BOOL      g_mgmtReadMsgReady = FALSE; /**< TRUE if rx mgmt msg to process
 static BOOL      g_mgmtAppWaiting = FALSE;
 static volatile BOOL g_exIntNeedsServicing = FALSE; /**< TRUE if external interrupt needs processing, else FALSE */
 static BOOL      g_wiFiConnectionChanged = FALSE;
-static BOOL      g_wiFiConnection = FALSE;
 static BOOL      g_logicalConnection = FALSE;
 static uint8_t   g_eventNotificationAction = WF_NOTIFY_ALL_EVENTS;
 static uint8_t   g_funcFlags = 0x00;  
@@ -789,11 +793,6 @@ void wf_sendMgmtMsg(uint8_t* p_header, uint8_t headerLength, uint8_t* p_data, ui
  */
 #define wf_isInWFProcessEvent()    ((g_funcFlags & WF_PROCESS_EVENT_FUNC) > 0)
 
-/**
- * Called form main loop to support 802.11 operations
- */
-void wf_macProcess(void);
-
 void wf_sendRAWManagementFrame(uint16_t bufLen);
 
 /**
@@ -931,6 +930,14 @@ void wf_init() {
 
   // if MRF24WB   
 #if !defined(MRF24WG)
+#ifdef WF_DEBUG
+  usart_putstr(USART1, "romVersion: ");
+  usart_puthex8(USART1, deviceInfo.romVersion);
+  usart_putc(USART1, '\n');
+  usart_putstr(USART1, "patchVersion: ");
+  usart_puthex8(USART1, deviceInfo.patchVersion);
+  usart_putc(USART1, '\n');
+#endif
   WF_ASSERT(deviceInfo.romVersion == 0x12);
   WF_ASSERT(deviceInfo.patchVersion >= 0x02);
   if (deviceInfo.romVersion == 0x12 && deviceInfo.patchVersion >= 0x09) {
@@ -1123,14 +1130,13 @@ void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
     /* mgmt response subtype had better match subtype we were expecting */
     WF_ASSERT(hdr.subtype == expectedSubtype);
 
-    if (hdr.result == WF_ERROR_DISCONNECT_FAILED
-            || hdr.result == WF_ERROR_NOT_CONNECTED) {
-#if defined(STACK_USE_UART)
-      putrsUART("Disconnect failed. Disconnect is allowed only when module is in connected state\r\n");
+    if (hdr.result == WF_ERROR_DISCONNECT_FAILED || hdr.result == WF_ERROR_NOT_CONNECTED) {
+#ifdef WF_DEBUG
+      usart_putstr(USART1, "Disconnect failed. Disconnect is allowed only when module is in connected state\n");
 #endif
     } else if (hdr.result == WF_ERROR_NO_STORED_BSS_DESCRIPTOR) {
-#if defined(STACK_USE_UART)
-      putrsUART("No stored scan results\r\n");
+#ifdef WF_DEBUG
+      usart_putstr(USART1, "No stored scan results\n");
 #endif
     } else {
       WF_ASSERT(hdr.result == WF_SUCCESS);
@@ -1431,7 +1437,7 @@ BOOL wf_isNotifyApp(uint8_t event) {
 
 void wf_signalWiFiConnectionChanged(BOOL state) {
   g_wiFiConnectionChanged = TRUE;
-  g_wiFiConnection = state;
+  wf_connected = state;
 }
 
 void wf_setLogicalConnectionState(BOOL state) {
@@ -1465,19 +1471,18 @@ BOOL wf_rawGetMgmtRxBuffer(uint16_t* p_numBytes) {
 
 void wf_deallocateDataRxBuffer(void) {
   wf_rawMove(RAW_RX_ID, RAW_DATA_POOL, FALSE, 0);
-}    
+}
 
-uint16_t wf_rawMountRxBuffer(void)
-{
-    uint16_t length;
-    
-    length = wf_rawMove(RAW_RX_ID, RAW_MAC, TRUE, 0);
-    
-    g_rawWindowReady[RAW_RX_ID] = TRUE;
-    wf_setRawWindowState(RAW_RX_ID, WF_RAW_DATA_MOUNTED);
-    
-    return length;
-} 
+uint16_t wf_rawMountRxBuffer(void) {
+  uint16_t length;
+
+  length = wf_rawMove(RAW_RX_ID, RAW_MAC, TRUE, 0);
+
+  g_rawWindowReady[RAW_RX_ID] = TRUE;
+  wf_setRawWindowState(RAW_RX_ID, WF_RAW_DATA_MOUNTED);
+
+  return length;
+}
 
 void wf_rawRead(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t* p_dest) {
   wf_rawSetIndex(rawId, startIndex);
@@ -1486,7 +1491,7 @@ void wf_rawRead(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t* p_
 
 void wf_rawGetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
   uint8_t regId;
-#if defined(OUTPUT_RAW_TX_RX)
+#if defined(WF_OUTPUT_RAW_TX_RX)
   uint16_t i;
 #endif
 
@@ -1501,18 +1506,18 @@ void wf_rawGetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
   regId = (rawId == RAW_ID_0) ? RAW_0_DATA_REG : RAW_1_DATA_REG;
   wf_readWFArray(regId, pBuffer, length);
 
-#if defined(OUTPUT_RAW_TX_RX)
+#if defined(WF_OUTPUT_RAW_TX_RX)
   for (i = 0; i < length; ++i) {
-    char buf[16];
-    sprintf(buf, "R: %#x\r\n", pBuffer[i]);
-    putsUART(buf);
+    usart_puthex8(USART1, pBuffer[i]);
+    usart_putc(USART1, ' ');
   }
+  usart_putc(USART1, '\n');
 #endif
 }
 
 void wf_rawSetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
   uint8_t regId;
-#if defined(OUTPUT_RAW_TX_RX)
+#if defined(WF_OUTPUT_RAW_TX_RX)
   uint16_t i;
 #endif    
 
@@ -1526,12 +1531,12 @@ void wf_rawSetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
   regId = (rawId == RAW_ID_0) ? RAW_0_DATA_REG : RAW_1_DATA_REG;
   wf_writeWFArray(regId, pBuffer, length);
 
-#if defined(OUTPUT_RAW_TX_RX)
+#if defined(WF_OUTPUT_RAW_TX_RX)
   for (i = 0; i < length; ++i) {
-    char buf[16];
-    sprintf(buf, "T: %#x\r\n", pBuffer[i]);
-    putsUART(buf);
+    usart_puthex8(USART1, pBuffer[i]);
+    usart_putc(USART1, ' ');
   }
+  usart_putc(USART1, '\n');
 #endif
 }
 
@@ -1784,7 +1789,6 @@ void wf_ensureWFisAwake() {
     // will need to put device back into PS-Poll sleep mode
     SetSleepNeeded();
   }
-
 #endif
 }  
 
@@ -1811,35 +1815,35 @@ void wf_hardwareInit() {
 
 void wf_rawInit() {
   // By default, Scratch is mounted to RAW 1 after reset.  In order to mount it on RAW0
-    // we need to first unmount it from RAW 1.
-    wf_scratchUnmount(RAW_TX_ID);
+  // we need to first unmount it from RAW 1.
+  wf_scratchUnmount(RAW_TX_ID);
 
-    // mount scratch temporarily to see how many bytes it has, then unmount it
-    g_sizeofScratchMemory = wf_scratchMount(RAW_RX_ID);  /* put back in if need to know size of scratch */
-    wf_scratchUnmount(RAW_RX_ID);
+  // mount scratch temporarily to see how many bytes it has, then unmount it
+  g_sizeofScratchMemory = wf_scratchMount(RAW_RX_ID); /* put back in if need to know size of scratch */
+  wf_scratchUnmount(RAW_RX_ID);
 
-    g_rawWindowReady[RAW_RX_ID] = FALSE;
+  g_rawWindowReady[RAW_RX_ID] = FALSE;
 
-    g_encPtrRAWId[ENC_RD_PTR_ID] = RAW_RX_ID;
-    g_encIndex[ENC_RD_PTR_ID] = BASE_SCRATCH_ADDR; //BASE_TCB_ADDR;
+  g_encPtrRAWId[ENC_RD_PTR_ID] = RAW_RX_ID;
+  g_encIndex[ENC_RD_PTR_ID] = BASE_SCRATCH_ADDR; //BASE_TCB_ADDR;
 
-    // don't mount tx raw at init because it's needed for raw mgmt messages
-    g_rawWindowReady[RAW_TX_ID] = FALSE;
-    wf_setRawWindowState(RAW_TX_ID, WF_RAW_UNMOUNTED);
+  // don't mount tx raw at init because it's needed for raw mgmt messages
+  g_rawWindowReady[RAW_TX_ID] = FALSE;
+  wf_setRawWindowState(RAW_TX_ID, WF_RAW_UNMOUNTED);
 
-    g_encPtrRAWId[ENC_WT_PTR_ID] = RAW_INVALID_ID;
-    g_encIndex[ENC_WT_PTR_ID] = BASE_TX_ADDR;                     // set tx encode ptr (index) to start of tx buf + 4 bytes
+  g_encPtrRAWId[ENC_WT_PTR_ID] = RAW_INVALID_ID;
+  g_encIndex[ENC_WT_PTR_ID] = BASE_TX_ADDR; // set tx encode ptr (index) to start of tx buf + 4 bytes
 
-    g_wasDiscarded    = TRUE;                                     // set state such that last rx packet was discarded
-    g_rxBufferSize    = 0;                                        // current rx buffer length (none) is 0 bytes
-    g_txPacketLength  = 0;                                        // current tx packet length (none) is 0 bytes
-    g_txBufferFlushed = TRUE;                                     // tx buffer is flushed
+  g_wasDiscarded = TRUE; // set state such that last rx packet was discarded
+  g_rxBufferSize = 0; // current rx buffer length (none) is 0 bytes
+  g_txPacketLength = 0; // current tx packet length (none) is 0 bytes
+  g_txBufferFlushed = TRUE; // tx buffer is flushed
 
-    // from ENC MAC init
-    // encWrPtr is left pointing to BASE_TX_ADDR
-    // encRdPtr is not initialized... we leave it pointing to BASE_TCB_ADDR
+  // from ENC MAC init
+  // encWrPtr is left pointing to BASE_TX_ADDR
+  // encRdPtr is not initialized... we leave it pointing to BASE_TCB_ADDR
 
-    g_rxIndexSetBeyondBuffer = FALSE;
+  g_rxIndexSetBeyondBuffer = FALSE;
 }
 
 void wf_isr() {
@@ -1931,11 +1935,6 @@ void wf_scanGetResult(uint8_t listIndex, tWFScanResult* p_scanResult) {
   /* fix up endianness on the two 16-bit values in the scan results */
   p_scanResult->beaconPeriod = WFSTOHS(p_scanResult->beaconPeriod);
   p_scanResult->atimWindow = WFSTOHS(p_scanResult->atimWindow);
-
-  /* reference for how to retrieve RSSI */
-  /* Display SSID  & Channel */
-  /* sprintf(rssiChan, "  => RSSI: %u, Channel: %u\r\n",  p_scanResult->rssi, p_scanResult->channel);  */
-  /* putsUART(rssiChan); */
 }   
 
 BOOL wf_cmIsHostScanAllowed(void) {
@@ -2030,15 +2029,14 @@ uint16_t wf_rawMove(uint16_t rawId, uint16_t srcDest, BOOL rawIsDestination, uin
   uint8_t regValue8;
   uint16_t ctrlVal = 0;
 
-  if (rawIsDestination)
-  {
-      ctrlVal |= 0x8000;
+  if (rawIsDestination) {
+    ctrlVal |= 0x8000;
   }
 
   /* fix later, simply need to ensure that size is 12 bits are less */
-  ctrlVal |= (srcDest << 8);              /* defines are already shifted by 4 bits */
-  ctrlVal |= ((size >> 8) & 0x0f) << 8;   /* MS 4 bits of size (bits 11:8)         */
-  ctrlVal |= (size & 0x00ff);             /* LS 8 bits of size (bits 7:0)          */
+  ctrlVal |= (srcDest << 8); /* defines are already shifted by 4 bits */
+  ctrlVal |= ((size >> 8) & 0x0f) << 8; /* MS 4 bits of size (bits 11:8)         */
+  ctrlVal |= (size & 0x00ff); /* LS 8 bits of size (bits 7:0)          */
 
   /* Clear the interrupt bit in the register */
   regValue8 = (rawId == RAW_ID_0) ? WF_HOST_INT_MASK_RAW_0_INT_0 : WF_HOST_INT_MASK_RAW_1_INT_0;
@@ -2091,8 +2089,8 @@ uint16_t wf_waitForRawMoveComplete(uint8_t rawId) {
 
   #if defined(WF_DEBUG)
     // Before we enter the while loop, get the tick timer count and save it
-    maxAllowedTicks = TICKS_PER_SECOND / 2;  /* 500 ms timeout */
-    startTickCount = (UINT32)TickGet();
+    maxAllowedTicks = 500;  /* 500 ms timeout */
+    startTickCount = systick_uptime();
   #endif
   while (1)
   {
@@ -2104,7 +2102,7 @@ uint16_t wf_waitForRawMoveComplete(uint8_t rawId) {
 
     #if defined(WF_DEBUG)
       /* If timed out waiting for RAW Move complete than lock up */
-      if (TickGet() - startTickCount >= maxAllowedTicks) {
+      if (systick_uptime() - startTickCount >= maxAllowedTicks) {
           WF_ASSERT(FALSE);
       }
     #endif
@@ -2280,8 +2278,7 @@ void wf_configureLowPowerMode(uint8_t action) {
 void wf_setFuncState(uint8_t funcMask, uint8_t state) {
   if (state == WF_ENTERING_FUNCTION) {
     g_funcFlags |= funcMask;
-  }
-  else {
+  } else {
     g_funcFlags &= ~funcMask;
   }
 }

@@ -59,10 +59,10 @@ void Mrf24w::connect() {
 }
 
 void Mrf24w::loop() {
-  //  if (wf_get_conn_state()) {
-  //    stack_loop();
-  //  }
-  //  wf_drv_process();
+  if (wf_connected) {
+    stack_loop();
+  }
+  wf_macProcess();
 }
 
 void Mrf24w::setLocalIp(uint8_t localIpAddr[]) {
@@ -132,7 +132,11 @@ void Mrf24w::processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo)
       Serial1.print("WF_EVENT_SCAN_RESULTS_READY: ");
       Serial1.println(eventInfo);
       for (i = 0; i < eventInfo; i++) {
+        char ssid[20];
         wf_scanGetResult(i, &scanResult);
+        strncpy(ssid, (const char*)scanResult.ssid, scanResult.ssidLen);
+        ssid[scanResult.ssidLen] = '\0';
+        Serial1.println(ssid);
       }
       break;
     }
@@ -140,6 +144,15 @@ void Mrf24w::processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo)
     case WF_EVENT_RX_PACKET_RECEIVED:
       Serial1.print("WF_EVENT_RX_PACKET_RECEIVED: ");
       Serial1.println(eventInfo);
+      break;
+
+    case WF_EVENT_INVALID_WPS_PIN:
+      Serial1.println("WF_EVENT_INVALID_WPS_PIN");
+      break;
+
+    default:
+      Serial1.print("UNKNOWN Event: ");
+      Serial1.println(event);
       break;
   }
 
