@@ -82,13 +82,6 @@ void usart_puthex16(usart_dev* dev, uint16_t value) {
 
 #define WF_MAC_ADDRESS_LENGTH            (6)
 
-/* this block of defines is used to check illegal reentry when in WF API functions */
-#define WF_ENTERING_FUNCTION    (1)
-#define WF_LEAVING_FUNCTION     (0)
-
-/* bit masks for functions that need to be tracked when they are called */
-#define WF_PROCESS_EVENT_FUNC   ((uint8_t)0x01)
-
 /*------------------------------------------------------------------------------*/
 /* These are error codes returned in the result field of a management response. */
 /*------------------------------------------------------------------------------*/
@@ -310,33 +303,6 @@ void usart_puthex16(usart_dev* dev, uint16_t value) {
 #define MULTICAST_ADDRESS                   (6)
 #define ADDRESS_FILTER_DEACTIVATE           (0)
 
-/*----------------------------------------------------------------------------*/
-/* Events that can be invoked in WF_ProcessEvent().  Note that the            */
-/* connection events are optional, all other events the app must be notified. */
-/*----------------------------------------------------------------------------*/
-
-#define WF_EVENT_CONNECTION_SUCCESSFUL           (1)   /**< Connection attempt to network successful            */
-#define WF_EVENT_CONNECTION_FAILED               (2)   /**< Connection attempt failed                           */
-
-
-#define WF_EVENT_CONNECTION_TEMPORARILY_LOST     (3)   /**< Connection lost; MRF24W attempting to reconnect     */
-#define WF_EVENT_CONNECTION_PERMANENTLY_LOST     (4)   /**< Connection lost; MRF24W no longer trying to connect */  
-#define WF_EVENT_CONNECTION_REESTABLISHED        (5)
-
-#define WF_EVENT_FLASH_UPDATE_SUCCESSFUL         (6)   /**< Update to FLASH successful                          */
-#define WF_EVENT_FLASH_UPDATE_FAILED             (7)   /**< Update to FLASH failed                              */
-
-
-
-#define WF_EVENT_KEY_CALCULATION_REQUEST         (8)   /**< Key calculation is required                       */
-
-#define WF_EVENT_SCAN_RESULTS_READY              (9)   /**< scan results are ready                              */ 
-#define WF_EVENT_IE_RESULTS_READY                (10)  /**< IE data ready                                       */
-
-
-#define WF_EVENT_RX_PACKET_RECEIVED              (11)  /**< Rx data packet has been received by MRF24W          */
-#define WF_EVENT_INVALID_WPS_PIN                 (12)  /**< Invalid WPS pin was entered                            */
-
 /* eventInfo define for WF_ProcessEvent() when no additional info is supplied */
 #define WF_NO_ADDITIONAL_INFO       ((uint16_t)0xffff)
 
@@ -504,8 +470,6 @@ extern spi_dev*  wf_spi;
 extern gpio_dev* wf_cs_port;
 extern uint8_t   wf_cs_bit;
 
-extern void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
-
 static uint8_t   g_buf[3];
 static uint8_t   g_hostIntSaved = 0;
 static uint8_t   g_eintHostIntRegValue;
@@ -627,7 +591,7 @@ void wf_hostInterruptRegInit(uint8_t hostIntrMaskRegMask, uint8_t state);
  *                 - WF_LOW_POWER_MODE_ON
  *                 - WF_LOW_POWER_MODE_OFF
  */
-void wf_wfConfigureLowPowerMode(uint8_t action);
+void wf_configureLowPowerMode(uint8_t action);
 
 void wf_hardwareInit();
 
@@ -1814,7 +1778,7 @@ void wf_ensureWFisAwake() {
     /* if the WF driver has activated PS-Poll */
     if (g_psPollActive == TRUE) {
       /* wake up MRF24W */
-      WFConfigureLowPowerMode(WF_LOW_POWER_MODE_OFF);
+      wf_configureLowPowerMode(WF_LOW_POWER_MODE_OFF);
     }
 
     // will need to put device back into PS-Poll sleep mode
@@ -1842,7 +1806,7 @@ void wf_hardwareInit() {
           WF_INT_ENABLE);
 
   /* Disable PS-Poll mode */
-  wf_wfConfigureLowPowerMode(WF_LOW_POWER_MODE_OFF);
+  wf_configureLowPowerMode(WF_LOW_POWER_MODE_OFF);
 }
 
 void wf_rawInit() {
@@ -2286,7 +2250,7 @@ void wf_hostInterruptRegInit(uint8_t hostIntrMaskRegMask, uint8_t state) {
 #define REG_ENABLE_LOW_POWER_MASK   ((uint16_t)(0x01))
 #define REG_DISABLE_LOW_POWER_MASK  ((uint16_t)(0x00))
 
-void wf_wfConfigureLowPowerMode(uint8_t action) {
+void wf_configureLowPowerMode(uint8_t action) {
   uint16_t lowPowerStatusRegValue;
 
   if (action == WF_LOW_POWER_MODE_ON) { /* if activating PS-Poll mode on MRF24W */
@@ -2310,5 +2274,14 @@ void wf_wfConfigureLowPowerMode(uint8_t action) {
       lowPowerStatusRegValue = wf_read16BitWFRegister(WF_INDEX_DATA_REG);
 
     } while (lowPowerStatusRegValue & REG_ENABLE_LOW_POWER_MASK);
+  }
+}
+
+void wf_setFuncState(uint8_t funcMask, uint8_t state) {
+  if (state == WF_ENTERING_FUNCTION) {
+    g_funcFlags |= funcMask;
+  }
+  else {
+    g_funcFlags &= ~funcMask;
   }
 }

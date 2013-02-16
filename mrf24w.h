@@ -10,7 +10,7 @@ extern "C" {
 #include "uip/uip.h"
 }
 
-typedef void (*Mrf24wConnectedFn)(uint8_t connected);
+typedef void (*Mrf24wProcessEvent)(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
 
 class Mrf24w {
 public:
@@ -29,18 +29,18 @@ public:
   void setSecurityType(uint8_t securityType);
   void setWirelessMode(uint8_t wirelessMode);
 
-  void setConnectedFn(Mrf24wConnectedFn connectedFn) {
-    m_connectedFn = connectedFn;
+  void setProcessEventFn(Mrf24wProcessEvent processEventFn) {
+    m_processEventFn = processEventFn;
   }
 
 private:
   uint8_t m_csPin;
   uint8_t m_intPin;
-  Mrf24wConnectedFn m_connectedFn;
+  Mrf24wProcessEvent m_processEventFn;
 
-  friend void Mrf24w_wf_hook_on_connected(void* userData, uint8_t connected);
+  friend void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
 
-  void connected(uint8_t connected);
+  void processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
 };
 
 #endif	/* MRF24W_H */

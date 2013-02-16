@@ -20,14 +20,7 @@ void stack_init() {
 
   struct uip_eth_addr mac;
 
-  uint8_t* mac_addr = zg_get_mac();
-
-  mac.addr[0] = mac_addr[0];
-  mac.addr[1] = mac_addr[1];
-  mac.addr[2] = mac_addr[2];
-  mac.addr[3] = mac_addr[3];
-  mac.addr[4] = mac_addr[4];
-  mac.addr[5] = mac_addr[5];
+  wf_getMacAddress(mac.addr);
 
   timer_set(&stack_periodicTimer, CLOCK_SECOND / 2);
   timer_set(&stack_arpTimer, CLOCK_SECOND * 10);

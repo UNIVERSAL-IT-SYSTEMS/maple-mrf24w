@@ -34,6 +34,40 @@ extern "C" {
 #define WF_SECURITY_WEP_SHAREDKEY  (0)
 #define WF_SECURITY_WEP_OPENKEY    (1)
 
+  /*----------------------------------------------------------------------------*/
+  /* Events that can be invoked in WF_ProcessEvent().  Note that the            */
+  /* connection events are optional, all other events the app must be notified. */
+  /*----------------------------------------------------------------------------*/
+
+#define WF_EVENT_CONNECTION_SUCCESSFUL           (1)   /**< Connection attempt to network successful            */
+#define WF_EVENT_CONNECTION_FAILED               (2)   /**< Connection attempt failed                           */
+
+
+#define WF_EVENT_CONNECTION_TEMPORARILY_LOST     (3)   /**< Connection lost; MRF24W attempting to reconnect     */
+#define WF_EVENT_CONNECTION_PERMANENTLY_LOST     (4)   /**< Connection lost; MRF24W no longer trying to connect */  
+#define WF_EVENT_CONNECTION_REESTABLISHED        (5)
+
+#define WF_EVENT_FLASH_UPDATE_SUCCESSFUL         (6)   /**< Update to FLASH successful                          */
+#define WF_EVENT_FLASH_UPDATE_FAILED             (7)   /**< Update to FLASH failed                              */
+
+
+
+#define WF_EVENT_KEY_CALCULATION_REQUEST         (8)   /**< Key calculation is required                         */
+
+#define WF_EVENT_SCAN_RESULTS_READY              (9)   /**< scan results are ready                              */ 
+#define WF_EVENT_IE_RESULTS_READY                (10)  /**< IE data ready                                       */
+
+
+#define WF_EVENT_RX_PACKET_RECEIVED              (11)  /**< Rx data packet has been received by MRF24W          */
+#define WF_EVENT_INVALID_WPS_PIN                 (12)  /**< Invalid WPS pin was entered                         */
+
+  /* this block of defines is used to check illegal reentry when in WF API functions */
+#define WF_ENTERING_FUNCTION    (1)
+#define WF_LEAVING_FUNCTION     (0)
+
+  /* bit masks for functions that need to be tracked when they are called */
+#define WF_PROCESS_EVENT_FUNC   ((uint8_t)0x01)
+
   /*---------------------------------------------------------------------*/
   /* Network Type defines                                                */
   /* Used in WF_CPSet/GetNetworkType, WF_CPSetElements, WF_CPGetElements */
@@ -105,6 +139,8 @@ extern "C" {
 
   } tWFScanResult;
 
+  extern void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
+
   void wf_init();
   void wf_isr();
 
@@ -161,6 +197,14 @@ extern "C" {
    * @param p_scanResult Pointer to location to store the scan result structure
    */
   void wf_scanGetResult(uint8_t listIndex, tWFScanResult* p_scanResult);
+
+  /**
+   * Called by WF_ProcessEvent() to be able to detect if there is an attempt 
+   *           to send a management message while processing the event (not allowed).
+   * @param funcMask bit mask indicating the calling function
+   * @param state WF_ENTERING_FUNCTION or WF_LEAVING_FUNCTION
+   */
+  void wf_setFuncState(uint8_t funcMask, uint8_t state);
 
   void wf_connect();
   void wf_getMacAddress(uint8_t* buf);

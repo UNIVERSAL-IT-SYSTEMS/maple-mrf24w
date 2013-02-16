@@ -5,6 +5,7 @@
 #include <wirish/wirish.h>
 #include <string.h>
 
+Mrf24w *g_mrf24wInstance = NULL;
 uint8_t stack_local_ip[4] = {192, 168, 0, 99};
 uint8_t stack_gateway_ip[4] = {192, 168, 0, 1};
 uint8_t stack_subnet_mask[4] = {255, 255, 255, 0};
@@ -17,24 +18,14 @@ spi_dev* wf_spi;
 gpio_dev* wf_cs_port;
 uint8_t wf_cs_bit;
 
-void Mrf24w_wf_hook_on_connected(void* userData, uint8_t connected) {
-  Mrf24w* mrf24w = (Mrf24w*) userData;
-  if (mrf24w) {
-    mrf24w->connected(connected);
-  }
-}
-
 extern "C" void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) {
-  Serial1.print("wf_processEvent: ");
-  Serial1.print(event);
-  Serial1.print(", ");
-  Serial1.print(eventInfo);
-  Serial1.println();
+  ASSERT(g_mrf24wInstance);
+  g_mrf24wInstance->processEvent(event, eventInfo, extraInfo);
 }
 
-Mrf24w::Mrf24w(HardwareSPI &spi, uint8_t csPin, uint8_t intPin) : m_csPin(csPin), m_intPin(intPin), m_connectedFn(NULL) {
+Mrf24w::Mrf24w(HardwareSPI &spi, uint8_t csPin, uint8_t intPin) : m_csPin(csPin), m_intPin(intPin), m_processEventFn(NULL) {
   const stm32_pin_info *csPinInfo = &PIN_MAP[csPin];
-
+  g_mrf24wInstance = this;
   wf_spi = spi.c_dev();
   wf_cs_port = csPinInfo->gpio_device;
   wf_cs_bit = csPinInfo->gpio_bit;
@@ -102,16 +93,59 @@ void Mrf24w::setWirelessMode(uint8_t wirelessMode) {
   wf_wireless_mode = wirelessMode;
 }
 
-void Mrf24w::connected(uint8_t connected) {
-  if (connected) {
-    Serial1.println("connected");
+void Mrf24w::processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) {
+  wf_setFuncState(WF_PROCESS_EVENT_FUNC, WF_ENTERING_FUNCTION);
 
-    Serial1.println("stack_init");
-    stack_init();
-  } else {
-    Serial1.println("disconnected");
+  Serial1.print("wf_processEvent: ");
+  Serial1.print(event);
+  Serial1.print(", ");
+  Serial1.print(eventInfo);
+  Serial1.println();
+  switch (event) {
+    case WF_EVENT_CONNECTION_SUCCESSFUL:
+      Serial1.println("WF_EVENT_CONNECTION_SUCCESSFUL");
+      break;
+
+    case WF_EVENT_CONNECTION_FAILED:
+      Serial1.print("WF_EVENT_CONNECTION_FAILED: ");
+      Serial1.println(eventInfo);
+      break;
+
+    case WF_EVENT_CONNECTION_TEMPORARILY_LOST:
+      Serial1.print("WF_EVENT_CONNECTION_TEMPORARILY_LOST: ");
+      Serial1.println(eventInfo);
+      break;
+
+    case WF_EVENT_CONNECTION_PERMANENTLY_LOST:
+      Serial1.print("WF_EVENT_CONNECTION_PERMANENTLY_LOST: ");
+      Serial1.println(eventInfo);
+      break;
+
+    case WF_EVENT_CONNECTION_REESTABLISHED:
+      Serial1.println("WF_EVENT_CONNECTION_REESTABLISHED");
+      break;
+
+    case WF_EVENT_SCAN_RESULTS_READY:
+    {
+      uint16_t i;
+      tWFScanResult scanResult;
+      Serial1.print("WF_EVENT_SCAN_RESULTS_READY: ");
+      Serial1.println(eventInfo);
+      for (i = 0; i < eventInfo; i++) {
+        wf_scanGetResult(i, &scanResult);
+      }
+      break;
+    }
+
+    case WF_EVENT_RX_PACKET_RECEIVED:
+      Serial1.print("WF_EVENT_RX_PACKET_RECEIVED: ");
+      Serial1.println(eventInfo);
+      break;
   }
-  if (m_connectedFn) {
-    m_connectedFn(connected);
+
+  if (m_processEventFn) {
+    m_processEventFn(event, eventInfo, extraInfo);
   }
+
+  wf_setFuncState(WF_PROCESS_EVENT_FUNC, WF_LEAVING_FUNCTION);
 }
