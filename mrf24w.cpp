@@ -43,6 +43,8 @@ void Mrf24w::begin() {
   //  wf_hook_on_connected_user_data = this;
   wf_init();
 
+  stack_init();
+  
   Serial1.println("begin end");
 }
 
