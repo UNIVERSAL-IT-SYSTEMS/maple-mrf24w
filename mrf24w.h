@@ -37,6 +37,11 @@ private:
   uint8_t m_csPin;
   uint8_t m_intPin;
   Mrf24wProcessEvent m_processEventFn;
+  char m_ssid[32];
+  uint8_t m_securityPassphrase[64];
+  uint8_t m_securityPassphraseLen;
+  uint8_t m_securityType;
+  uint8_t m_wirelessMode;
 
   friend void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
 

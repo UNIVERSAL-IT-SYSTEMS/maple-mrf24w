@@ -9,11 +9,6 @@ Mrf24w *g_mrf24wInstance = NULL;
 uint8_t stack_local_ip[4] = {192, 168, 0, 99};
 uint8_t stack_gateway_ip[4] = {192, 168, 0, 1};
 uint8_t stack_subnet_mask[4] = {255, 255, 255, 0};
-char wf_ssid[32];
-char wf_security_passphrase[64];
-uint8_t wf_security_type = WF_SECURITY_OPEN;
-uint8_t wf_wireless_mode = WF_INFRASTRUCTURE;
-uint8_t* wf_wep_keys;
 spi_dev* wf_spi;
 gpio_dev* wf_cs_port;
 uint8_t wf_cs_bit;
@@ -26,6 +21,10 @@ extern "C" void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extr
 Mrf24w::Mrf24w(HardwareSPI &spi, uint8_t csPin, uint8_t intPin) : m_csPin(csPin), m_intPin(intPin), m_processEventFn(NULL) {
   const stm32_pin_info *csPinInfo = &PIN_MAP[csPin];
   g_mrf24wInstance = this;
+
+  m_securityType = WF_SECURITY_OPEN;
+  m_wirelessMode = WF_INFRASTRUCTURE;
+
   wf_spi = spi.c_dev();
   wf_cs_port = csPinInfo->gpio_device;
   wf_cs_bit = csPinInfo->gpio_bit;
@@ -44,7 +43,7 @@ void Mrf24w::begin() {
   wf_init();
 
   stack_init();
-  
+
   Serial1.println("begin end");
 }
 
@@ -57,7 +56,19 @@ void Mrf24w::scan(uint8_t cpid) {
 }
 
 void Mrf24w::connect() {
-  wf_connect();
+  uint8_t connectionProfileId;
+  uint8_t channelList[] = {};
+
+  connectionProfileId = wf_cpCreate();
+  ASSERT(connectionProfileId != 0xff);
+  wf_cpSetSsid(connectionProfileId, (uint8_t*) m_ssid, strlen(m_ssid));
+  wf_cpSetNetworkType(connectionProfileId, WF_INFRASTRUCTURE);
+  wf_caSetScanType(WF_ACTIVE_SCAN);
+  wf_caSetChannelList(channelList, sizeof (channelList));
+  wf_caSetListRetryCount(10);
+  wf_caSetBeaconTimeout(40);
+  wf_cpSetSecurity(connectionProfileId, m_securityType, 0, m_securityPassphrase, m_securityPassphraseLen);
+  wf_cmConnect(connectionProfileId);
 }
 
 void Mrf24w::loop() {
@@ -80,19 +91,20 @@ void Mrf24w::setSubnetMask(uint8_t subnetMask[]) {
 }
 
 void Mrf24w::setSSID(const char* ssid) {
-  strcpy(wf_ssid, ssid);
+  strcpy(m_ssid, ssid);
 }
 
 void Mrf24w::setSecurityPassphrase(const char* securityPassphrase) {
-  strcpy(wf_security_passphrase, securityPassphrase);
+  strcpy((char*) m_securityPassphrase, securityPassphrase);
+  m_securityPassphraseLen = strlen(securityPassphrase);
 }
 
 void Mrf24w::setSecurityType(uint8_t securityType) {
-  wf_security_type = securityType;
+  m_securityType = securityType;
 }
 
 void Mrf24w::setWirelessMode(uint8_t wirelessMode) {
-  wf_wireless_mode = wirelessMode;
+  m_wirelessMode = wirelessMode;
 }
 
 void Mrf24w::processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) {
@@ -136,7 +148,7 @@ void Mrf24w::processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo)
       for (i = 0; i < eventInfo; i++) {
         char ssid[20];
         wf_scanGetResult(i, &scanResult);
-        strncpy(ssid, (const char*)scanResult.ssid, scanResult.ssidLen);
+        strncpy(ssid, (const char*) scanResult.ssid, scanResult.ssidLen);
         ssid[scanResult.ssidLen] = '\0';
         Serial1.println(ssid);
       }

@@ -83,6 +83,13 @@ extern "C" {
 #define WF_BSSID_LENGTH                 (6)
 #define WF_MAX_NUM_RATES                (8)
 
+  /*----------------------------------------------------*/
+  /* Scan type defines                                  */
+  /* Used in WF_CASet/GetScanType, WF_CASet/GetElements */
+  /*----------------------------------------------------*/
+#define WF_ACTIVE_SCAN   (1)
+#define WF_PASSIVE_SCAN  (2)
+
   /**
    * Scan Results
    */
@@ -140,7 +147,7 @@ extern "C" {
   } tWFScanResult;
 
   extern uint8_t wf_connected;
-  
+
   extern void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
 
   void wf_init();
@@ -208,13 +215,156 @@ extern "C" {
    */
   void wf_setFuncState(uint8_t funcMask, uint8_t state);
 
-  void wf_connect();
   void wf_getMacAddress(uint8_t* buf);
 
   /**
    * Called form main loop to support 802.11 operations
    */
   void wf_macProcess(void);
+
+  /**
+   * /brief Creates a Connection Profile on the MRF24W.
+   * 
+   * Requests the MRF24W to create a Connection Profile (CP), assign it an ID, 
+   *     and set all the elements to default values.  The ID returned by this function
+   *     is used in other connection profile functions.  A maximum of 2 Connection 
+   *     Profiles can exist on the MRF24W.
+   * @return 
+   */
+  uint8_t wf_cpCreate();
+
+  /**
+   * /brief Sets the SSID for the specified Connection Profile ID.
+   * 
+   * Sets the SSID and SSID Length elements in the Connection Profile.  Note that
+   *     an Access Point can have either a visible or hidden SSID.  If an Access Point
+   *     uses a hidden SSID then an active scan must be used (see scanType field in the 
+   *     Connection Algorithm).
+   * @param CpId Connection Profile ID
+   * @param p_ssid Pointer to the SSID string
+   * @param ssidLength Number of bytes in the SSID
+   */
+  void wf_cpSetSsid(uint8_t CpId, uint8_t *p_ssid, uint8_t ssidLength);
+
+  /**
+   * /brief Sets the network for the specified Connection Profile ID.
+   * 
+   * Sets the Network Type element a Connection Profile.  Allowable values are:
+   * WF_INFRASTRUCTURE
+   * WF_ADHOC
+   * 
+   * @param CpId Connection Profile ID
+   * @param networkType Type of network to create (infrastructure or adhoc)
+   */
+  void wf_cpSetNetworkType(uint8_t CpId, uint8_t networkType);
+
+  /**
+   * /brief Sets the channel list.
+   * 
+   * Sets the Channel List used by the Connection Algorithm.
+   * 
+   * @param p_channelList Pointer to channel list.
+   * @param numChannels Number of channels in p_channelList.  If set to 0, the
+   *                      MRF24W will use all valid channels for the current 
+   *                      regional domain.
+   */
+  void wf_caSetChannelList(uint8_t *p_channelList, uint8_t numChannels);
+
+  /**
+   * /brief Sets the list retry count
+   * 
+   * Number of times to cycle through Connection Profile List before giving up on 
+   *     the connection attempt.  Since lists are not yet supported, this function 
+   *     actually sets the number of times the Connection Manager will try to connect
+   *     with the current Connection Profile before giving up.
+   * 
+   * @param listRetryCount 0 to 254 or WF_RETRY_FOREVER (255)
+   */
+  void wf_caSetListRetryCount(uint8_t listRetryCount);
+
+  /**
+   * /brief Sets the beacon timeout value.
+   * 
+   * Sets the Beacon Timeout used by the Connection Algorithm.
+   * 
+   *     <table>
+   *         Value   Description
+   *         -----   -----------
+   *         0       No monitoring of the beacon timeout condition.  The host will
+   *                  not be notified of this event.
+   *         1-255   Number of beacons missed before disconnect event occurs and 
+   *                  beaconTimeoutAction occurs.  If enabled, host will receive
+   *                  an event message indicating connection temporarily or 
+   *                  permanently lost, and if retrying, a connection successful
+   *                  event.
+   *     </table>
+   * 
+   * @param beaconTimeout Number of beacons that can be missed before the action in 
+   *                     beaconTimeoutAction is taken.
+   */
+  void wf_caSetBeaconTimeout(uint8_t beaconTimeout);
+
+  /**
+   * /brief Sets the security for the specified Connection Profile.
+   * 
+   * Configures security for a Connection Profile.
+   * 
+   *     <table>
+   *     Security                                Key         Length
+   *     --------                                ---         ------
+   *     WF_SECURITY_OPEN                        N/A         N/A
+   *     WF_SECURITY_WEP_40                      hex         4, 5 byte keys
+   *     WF_SECURITY_WEP_104                     hex         4, 13 byte keys
+   *     WF_SECURITY_WPA_WITH_KEY                hex         32 bytes
+   *     WF_SECURITY_WPA_WITH_PASS_PHRASE        ascii       8-63 ascii characters
+   *     WF_SECURITY_WPA2_WITH_KEY               hex         32 bytes
+   *     WF_SECURITY_WPA2_WITH_PASS_PHRASE       ascii       8-63 ascii characters
+   *     WF_SECURITY_WPA_AUTO_WITH_KEY           hex         32 bytes
+   *     WF_SECURITY_WPA_AUTO_WITH_PASS_PHRASE   ascii       8-63 ascii characters
+   *     </table>
+   * 
+   * @param CpId Connection Profile ID
+   * @param securityType Value corresponding to the security type desired.
+   * @param wepKeyIndex 0 thru 3 (only used if security type is WF_SECURITY_WEP_40 or WF_SECURITY_WEP_104)
+   * @param p_securityKey Binary key or passphrase (not used if security is WF_SECURITY_OPEN)
+   * @param securityKeyLength Number of bytes in p_securityKey (not used if security is WF_SECURITY_OPEN)
+   */
+  void wf_cpSetSecurity(uint8_t CpId, uint8_t securityType, uint8_t wepKeyIndex, uint8_t *p_securityKey, uint8_t securityKeyLength);
+
+  /**
+   * /brief Sets the Connection Algorith scan type
+   * 
+   * Configures the Connection Algorithm for the desired scan type.
+   * 
+   * Active scanning causes the MRF24W to send probe requests.  Passive
+   *     scanning implies the MRF24W only listens for beacons.
+   *     Default is WF_ACTIVE_SCAN.
+   * 
+   * @param scanType Desired scan type.  Either WF_ACTIVE_SCAN or WF_PASSIVE_SCAN.
+   */
+  void wf_caSetScanType(uint8_t scanType);
+
+  /**
+   * /brief Commands the MRF24W to start a connection.
+   * 
+   * Directs the Connection Manager to scan for and connect to a WiFi network.
+   *     This function does not wait until the connection attempt is successful, but 
+   *     returns immediately.  See WF_ProcessEvent for events that can occur as a 
+   *     result of a connection attempt being successful or not.
+   * 
+   *     Note that if the Connection Profile being used has WPA or WPA2 security
+   *     enabled and is using a passphrase, the connection manager will first 
+   *     calculate the PSK key, and then start the connection process.  The key 
+   *     calculation can take up to 30 seconds.
+   * 
+   * @param CpId If this value is equal to an existing Connection Profile�s ID than 
+   *             only that Connection Profile will be used to attempt a connection to 
+   *             a WiFi network.  
+   *             If this value is set to WF_CM_CONNECT_USING_LIST then the 
+   *             connectionProfileList will be used to connect, starting with the 
+   *             first Connection Profile in the list.
+   */
+  void wf_cmConnect(uint8_t CpId);
 
 #ifdef __cplusplus
 }

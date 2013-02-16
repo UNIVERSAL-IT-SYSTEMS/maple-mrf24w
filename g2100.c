@@ -420,6 +420,48 @@ typedef enum
   WF_NUM_REQUEST_SUBTYPES    
 } tMgmtMsgSubtypes;
 
+/*-------------------------------------------------------------*/
+/* Connection Profile Element ID�s                             */
+/* Used in conjunction with the WF_CP_SET_ELEMENT_SUBTYPE and  */
+/* WF_CP_GET_ELEMENT_SUBTYPE message subtypes                  */
+
+/*-------------------------------------------------------------*/
+typedef enum {
+  WF_CP_ELEMENT_ALL = 0, /* sends all elements in CP struct */
+  WF_CP_ELEMENT_SSID = 1,
+  WF_CP_ELEMENT_BSSID = 2,
+  WF_CP_ELEMENT_SECURITY = 3,
+  WF_CP_ELEMENT_NETWORK_TYPE = 4,
+  WF_CP_ELEMENT_ADHOC_BEHAVIOR = 5,
+  WF_CP_ELEMENT_WEP_KEY_INDEX = 6,
+  WF_CP_ELEMENT_SSID_TYPE = 7,
+  WF_CP_ELEMENT_WEPKEY_TYPE = 8
+} tCPElementIds;
+
+/*-------------------------------------------------------------*/
+/* Connection Algorithm Element ID�s                           */
+/* Used in conjunction with the WF_CA_SET_ELEMENT_SUBTYPE and  */
+/* WF_CA_GET_ELEMENT_SUBTYPE message subtypes                  */
+
+/*-------------------------------------------------------------*/
+typedef enum {
+  WF_CA_ELEMENT_ALL = 0,
+  WF_CA_ELEMENT_SCANTYPE = 1,
+  WF_CA_ELEMENT_RSSI = 2,
+  WF_CA_ELEMENT_CP_LIST = 3,
+  WF_CA_ELEMENT_LIST_RETRY_COUNT = 4,
+  WF_CA_ELEMENT_EVENT_NOTIFICATION_ACTION = 5,
+  WF_CA_ELEMENT_BEACON_TIMEOUT_ACTION = 6,
+  WF_CA_ELEMENT_DEAUTH_ACTION = 7,
+  WF_CA_ELEMENT_CHANNEL_LIST = 8,
+  WF_CA_ELEMENT_LISTEN_INTERVAL = 9,
+  WF_CA_ELEMENT_BEACON_TIMEOUT = 10,
+  WF_CA_ELEMENT_SCAN_COUNT = 11,
+  WF_CA_ELEMENT_MIN_CHANNEL_TIME = 12,
+  WF_CA_ELEMENT_MAX_CHANNEL_TIME = 13,
+  WF_CA_ELEMENT_PROBE_DELAY = 14
+} tCAElementIds;
+    
 /*----------------------------------------------------------------------------------------*/
 /* Structs                                                                                */
 /*----------------------------------------------------------------------------------------*/
@@ -879,6 +921,10 @@ void wf_setLogicalConnectionState(BOOL state);
 void wf_setRawRxMgmtInProgress(BOOL action);
 
 void wf_assertionFailed(uint16_t lineNumber);
+
+void wf_cpSetElement(uint8_t CpId, uint8_t elementId, uint8_t *p_elementData, uint8_t elementDataLength);
+
+void wf_caSetElement(uint8_t elementId, uint8_t *p_elementData, uint8_t elementDataLength);
 
 /***************************************************************************************************/
 
@@ -1960,14 +2006,6 @@ void wf_cmCheckConnectionState(uint8_t* p_state, uint8_t* p_currentCpId) {
   *p_currentCpId = msgData[1]; /* current CpId     */
 }  
 
-void wf_connect(){
- // TODO
-}
-
-uint8_t* wf_get_mac() {
-  return NULL; // TODO
-}
-
 void wf_chipReset() {
   uint16_t value;
 
@@ -2277,4 +2315,124 @@ void wf_setFuncState(uint8_t funcMask, uint8_t state) {
   } else {
     g_funcFlags &= ~funcMask;
   }
+}
+
+uint8_t wf_cpCreate() {
+  uint8_t hdr[2];
+  uint8_t cpId;
+
+  cpId = 0xff;
+
+  hdr[0] = WF_MGMT_REQUEST_TYPE;
+  hdr[1] = WF_CP_CREATE_PROFILE_SUBTYPE;
+
+  wf_sendMgmtMsg(hdr, sizeof (hdr), NULL, 0);
+
+  /* wait for MRF24W management response, read data, free response after read */
+  wf_waitForMgmtResponseAndReadData(WF_CP_CREATE_PROFILE_SUBTYPE, 1, MGMT_RESP_1ST_DATA_BYTE_INDEX, &cpId);
+
+  return cpId;
+}
+
+void wf_cpSetSsid(uint8_t CpId, uint8_t *p_ssid, uint8_t ssidLength) {
+  WF_ASSERT(ssidLength <= WF_MAX_SSID_LENGTH);
+  wf_cpSetElement(CpId, WF_CP_ELEMENT_SSID, (uint8_t *) p_ssid, ssidLength);
+}
+
+void wf_cpSetSecurity(uint8_t CpId, uint8_t securityType, uint8_t wepKeyIndex, uint8_t *p_securityKey, uint8_t securityKeyLength) {
+  uint8_t hdrBuf[7];
+  uint8_t *p_key;
+
+  /* Write out header portion of msg */
+  hdrBuf[0] = WF_MGMT_REQUEST_TYPE; /* indicate this is a mgmt msg     */
+  hdrBuf[1] = WF_CP_SET_ELEMENT_SUBTYPE; /* mgmt request subtype            */
+  hdrBuf[2] = CpId; /* Connection Profile ID           */
+  hdrBuf[3] = WF_CP_ELEMENT_SECURITY; /* Element ID                      */
+
+  /* Next to header bytes are really part of data, but need to put them in header      */
+  /* bytes in order to prepend to security key                                         */
+  hdrBuf[5] = securityType;
+  hdrBuf[6] = wepKeyIndex;
+
+  /* if security is open (no key) or WPS push button method */
+  if (securityType == WF_SECURITY_OPEN
+          || securityType == WF_SECURITY_WPS_PUSH_BUTTON
+          || securityType == WF_SECURITY_EAP) {
+    hdrBuf[4] = 2; /* Only data is security type and wep index */
+    p_key = NULL;
+    securityKeyLength = 0;
+  } else { /* else security is selected, so need to send key */
+    hdrBuf[4] = 2 + securityKeyLength; /* data is security type + wep index + key */
+    p_key = p_securityKey;
+  }
+
+  wf_sendMgmtMsg(hdrBuf, sizeof (hdrBuf), p_key, securityKeyLength);
+
+  /* wait for mgmt response, free after it comes in, don't need data bytes */
+  wf_waitForMgmtResponse(WF_CP_SET_ELEMENT_SUBTYPE, FREE_MGMT_BUFFER);
+}
+
+void wf_cpSetElement(uint8_t CpId, uint8_t elementId, uint8_t *p_elementData, uint8_t elementDataLength) {
+  uint8_t hdrBuf[5];
+
+  /* Write out header portion of msg */
+  hdrBuf[0] = WF_MGMT_REQUEST_TYPE; /* indicate this is a mgmt msg     */
+  hdrBuf[1] = WF_CP_SET_ELEMENT_SUBTYPE; /* mgmt request subtype            */
+  hdrBuf[2] = CpId; /* Connection Profile ID           */
+  hdrBuf[3] = elementId; /* Element ID                      */
+  hdrBuf[4] = elementDataLength; /* number of bytes of element data */
+
+  wf_sendMgmtMsg(hdrBuf, sizeof (hdrBuf), p_elementData, elementDataLength);
+
+  /* wait for mgmt response, free after it comes in, don't need data bytes */
+  wf_waitForMgmtResponse(WF_CP_SET_ELEMENT_SUBTYPE, FREE_MGMT_BUFFER);
+}
+
+void wf_cpSetNetworkType(uint8_t CpId, uint8_t networkType) {
+  wf_cpSetElement(CpId, WF_CP_ELEMENT_NETWORK_TYPE, &networkType, 1);
+}
+
+void wf_caSetScanType(uint8_t scanType) {
+  wf_caSetElement(WF_CA_ELEMENT_SCANTYPE, &scanType, sizeof (scanType));
+}
+
+void wf_caSetChannelList(uint8_t *p_channelList, uint8_t numChannels) {
+  wf_caSetElement(WF_CA_ELEMENT_CHANNEL_LIST, p_channelList, numChannels);
+}
+
+void wf_caSetListRetryCount(uint8_t listRetryCount) {
+  wf_caSetElement(WF_CA_ELEMENT_LIST_RETRY_COUNT, &listRetryCount, sizeof (listRetryCount));
+}
+
+void wf_caSetBeaconTimeout(uint8_t beaconTimeout) {
+  wf_caSetElement(WF_CA_ELEMENT_BEACON_TIMEOUT, &beaconTimeout, sizeof (beaconTimeout));
+}
+
+void wf_caSetElement(uint8_t elementId, uint8_t *p_elementData, uint8_t elementDataLength) {
+  uint8_t hdrBuf[4];
+
+  hdrBuf[0] = WF_MGMT_REQUEST_TYPE; /* indicate this is a mgmt msg     */
+  hdrBuf[1] = WF_CA_SET_ELEMENT_SUBTYPE; /* mgmt request subtype            */
+  hdrBuf[2] = elementId; /* Element ID                      */
+  hdrBuf[3] = elementDataLength; /* number of bytes of element data */
+
+  wf_sendMgmtMsg(hdrBuf, sizeof (hdrBuf), p_elementData, elementDataLength);
+
+  /* wait for mgmt response, free after it comes in, don't need data bytes */
+  wf_waitForMgmtResponse(WF_CA_SET_ELEMENT_SUBTYPE, FREE_MGMT_BUFFER);
+}
+
+void wf_cmConnect(uint8_t CpId) {
+  uint8_t hdrBuf[4];
+
+  /* Write out header portion of msg (which is whole msg, there is no data) */
+  hdrBuf[0] = WF_MGMT_REQUEST_TYPE; /* indicate this is a mgmt msg     */
+  hdrBuf[1] = WF_CM_CONNECT_SUBYTPE; /* mgmt request subtype            */
+  hdrBuf[2] = CpId;
+  hdrBuf[3] = 0;
+
+  wf_sendMgmtMsg(hdrBuf, sizeof (hdrBuf), NULL, 0);
+
+  /* wait for mgmt response, free after it comes in, don't need data bytes */
+  wf_waitForMgmtResponse(WF_CM_CONNECT_SUBYTPE, FREE_MGMT_BUFFER);
 }
