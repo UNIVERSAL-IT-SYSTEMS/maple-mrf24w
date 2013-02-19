@@ -11,11 +11,12 @@
 #include <libmaple/systick.h>
 
 #define WF_DEBUG
-#define WF_OUTPUT_RAW_TX_RX
+//#define WF_OUTPUT_RAW_TX_RX
 
-#define BOOL  uint8_t
-#define FALSE 0
-#define TRUE  1
+typedef enum _BOOL {
+  FALSE = 0,
+  TRUE
+} BOOL;
 
 void usart_puthex4(usart_dev* dev, uint8_t value) {
   char ch;
@@ -282,18 +283,13 @@ void usart_puthex16(usart_dev* dev, uint16_t value) {
 #define ENC_RD_PTR_ID                   (0)
 #define ENC_WT_PTR_ID                   (1)
 
-// Memory addresses
-#define RESERVED_CRYPTO_MEMORY          (128ul)
-#define RAMSIZE                         (24 * 1024ul)
-#define TXSTART                         (0x0000ul)
-#define RXSTART                         ((TXSTART + 1518ul + TCP_ETH_RAM_SIZE + RESERVED_HTTP_MEMORY + RESERVED_SSL_MEMORY + RESERVED_CRYPTO_MEMORY + 1ul) & 0xFFFE)
-#define	RXSTOP                          (RAMSIZE - 1ul)
-#define RXSIZE                          (RXSTOP - RXSTART + 1ul)
-#define BASE_TX_ADDR                    (TXSTART)
-#define BASE_SCRATCH_ADDR               (BASE_TX_ADDR + 1518ul)
-#define BASE_HTTPB_ADDR                 (BASE_SCRATCH_ADDR + TCP_ETH_RAM_SIZE)
-#define BASE_SSLB_ADDR                  (BASE_HTTPB_ADDR + RESERVED_HTTP_MEMORY)
-#define BASE_CRYPTOB_ADDR               (BASE_SSLB_ADDR + RESERVED_SSL_MEMORY)
+//============================================================================
+//                                  Rx/Tx Buffer Constants
+// Used to correlate former Ethernet packets to MRF24W packets.
+//============================================================================
+#define ENC_RX_BUF_TO_RAW_RX_BUF_ADJUSTMENT          ((RXSTART + ENC_PREAMBLE_SIZE)   - (ENC_PREAMBLE_OFFSET   + WF_RX_PREAMBLE_SIZE))
+#define ENC_TX_BUF_TO_RAW_TX_BUF_ADJUSTMENT          ((TXSTART + WF_TX_PREAMBLE_SIZE) - (WF_TX_PREAMBLE_OFFSET + WF_TX_PREAMBLE_SIZE))
+#define ENC_TCB_BUF_TO_RAW_SCRATCH_BUF_ADJUSTMENT    (BASE_SCRATCH_ADDR)
 
 #define ENABLE_MRF24WB0M                (1)
 
@@ -351,6 +347,12 @@ typedef enum {
   PARAM_DEFERRED_POWERSAVE            = 34,      /**< delay power start after dhcp done                                                                                 */
   PARAM_LINK_DOWN_THRESHOLD           = 35       /**< sets link down threshold */
 } tWFParam;
+
+/* SPI Tx/Rx Data Message Subtypes */
+#define WF_STD_DATA_MSG_SUBTYPE         ((uint8_t)1)
+#define WF_NULL_DATA_MSG_SUBTYPE        ((uint8_t)2)
+/* reserved value                       ((uint8_t)3) */
+#define WF_UNTAMPERED_DATA_MSG_SUBTYPE  ((uint8_t)4)
 
 /* SPI Tx Message Types */
 #define WF_DATA_REQUEST_TYPE            ((uint8_t)1)
@@ -462,6 +464,26 @@ typedef enum {
   WF_CA_ELEMENT_PROBE_DELAY = 14
 } tCAElementIds;
     
+#define SNAP_SIZE (6)
+
+#define SNAP_VAL        (0xaa)
+#define SNAP_CTRL_VAL   (0x03)
+#define SNAP_TYPE_VAL   (0x00)
+
+#define ETHER_IP        (0x00)
+#define ETHER_ARP       (0x06)
+
+#define ENC_PREAMBLE_SIZE    (sizeof(ENC_PREAMBLE))
+#define ENC_PREAMBLE_OFFSET  (10)
+
+#define WF_RX_PREAMBLE_SIZE   (sizeof(tWFRxPreamble))
+#define WF_TX_PREAMBLE_OFFSET (0)
+
+#define WF_TX_PREAMBLE_SIZE   (sizeof(tWFTxPreamble))
+
+#define MAX_PACKET_SIZE       (1514ul)
+#define MCHP_DATA_PACKET_SIZE (4 + MAX_PACKET_SIZE + 4)
+
 /*----------------------------------------------------------------------------------------*/
 /* Structs                                                                                */
 /*----------------------------------------------------------------------------------------*/
@@ -501,7 +523,66 @@ typedef struct mgmtIndicatePassphraseReady {
   uint8_t key[64];
   uint8_t ssidLen;
   uint8_t ssid[32];
-} tMgmtIndicatePassphraseReady;   
+} tMgmtIndicatePassphraseReady;
+
+typedef union {
+	uint8_t v[4];
+	struct {
+		uint16_t	 		ByteCount;
+		unsigned char	PreviouslyIgnored:1;
+		unsigned char	RXDCPreviouslySeen:1;
+		unsigned char	CarrierPreviouslySeen:1;
+		unsigned char	CodeViolation:1;
+		unsigned char	CRCError:1;
+		unsigned char	LengthCheckError:1;
+		unsigned char	LengthOutOfRange:1;
+		unsigned char	ReceiveOk:1;
+		unsigned char	Multicast:1;
+		unsigned char	Broadcast:1;
+		unsigned char	DribbleNibble:1;
+		unsigned char	ControlFrame:1;
+		unsigned char	PauseControlFrame:1;
+		unsigned char	UnsupportedOpcode:1;
+		unsigned char	VLANType:1;
+		unsigned char	Zero:1;
+	} bits;
+} RXSTATUS;
+
+/**
+ * A header appended at the start of all RX frames by the hardware
+ */
+typedef struct _ENC_PREAMBLE {
+  uint16_t NextPacketPointer;
+  RXSTATUS StatusVector;
+  MAC_ADDR DestMACAddr;
+  MAC_ADDR SourceMACAddr;
+  uint16_t Type;
+} ENC_PREAMBLE;
+
+typedef struct {
+  uint8_t type;
+  uint8_t subType;
+} tRxPreamble;
+
+typedef struct {
+  uint8_t snap[SNAP_SIZE];
+  MAC_ADDR DestMACAddr;
+  MAC_ADDR SourceMACAddr;
+  uint16_t Type;
+} tWFRxPreamble;
+
+typedef struct {
+  uint8_t reserved[4];
+} tWFTxPreamble;
+
+// A generic structure representing the Ethernet header starting all Ethernet
+// frames
+
+typedef struct {
+  MAC_ADDR DestMACAddr;
+  MAC_ADDR SourceMACAddr;
+  uint16_t Type;
+} ETHER_HEADER __attribute__((aligned(2)));
 
 /*----------------------------------------------------------------------------------------*/
 /* Global variables                                                                       */
@@ -926,6 +1007,64 @@ void wf_cpSetElement(uint8_t CpId, uint8_t elementId, uint8_t *p_elementData, ui
 
 void wf_caSetElement(uint8_t elementId, uint8_t *p_elementData, uint8_t elementDataLength);
 
+/**
+ * Number of bytes in the Data Rx packet if one is received, else 0.
+ * 
+ * NOTES: Called by MACGetHeader() to see if any data packets have been received.
+ *         If the MRF24W has received a data packet and the data packet is not
+ *         a management data packet, then this function returns the number of
+ *         bytes in the data packet. Otherwise it returns 0.
+ */
+uint16_t wf_macIFService(void);
+  
+uint16_t wf_swaps(uint16_t v);
+
+/**
+ * SendRAWDataFrame sends a Data Transmit request to the WF chip
+ *          using the Random Access Window (RAW) interface.  The pre-buffer
+ *          is used by the WF MAC to send routing information for the packet
+ *          while pBuf is the request that was submitted by the application.
+ *          The order of operations are
+ *              1) reserve a memory buffer of sufficient length on the WF chip
+ *              using RawMove.
+ *              2) Write the bytes for the pre-buffer and then the buffer
+ *              using the RawSetByte. Because the bytes are written
+ *              sequentially there is no need to call WFRawSetIndex
+ *              to adjust the write position.
+ *              3) instruct the WF chip that the command is ready for
+ *              processing.
+ *              4) perform any necessary cleanup.
+ * 
+ * @param bufLen length in bytes of the buffer
+ */
+void wf_sendRAWDataFrame(uint16_t bufLen);
+
+BOOL wf_isRawRxMgmtInProgress(void);
+
+BOOL wf_allocateDataTxBuffer(uint16_t bytesNeeded);
+
+/**
+ * Any time stack code changes the index within the 'logical' Ethernet RAM
+ *         this function must be called to assure the RAW driver is synced up with
+ *         where the stack code thinks it is within the Ethernet RAM.  This applies
+ *         to reading/writing tx data, rx data, or tcb data
+ * 
+ * @param encPtrId Identifies if trying to do a read or write to ENC RAM (RAW Window).
+ *                      Values are ENC_RD_PTR_ID, ENC_WT_PTR_ID.  g_encIndex[] must be
+ *                      valid before this function is called.
+ */
+void wf_syncENCPtrRAWState(uint8_t encPtrId);
+
+/**
+ * Writes the specified number of bytes to a mounted RAW window at the specified starting index
+ * 
+ * @param rawId RAW window ID being written to
+ * @param startIndex start index within RAW window to write to
+ * @param length number of bytes to write to RAW window
+ * @param p_src pointer to Host buffer write data
+ */
+void wf_rawWrite(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t *p_src);
+
 /***************************************************************************************************/
 
 
@@ -1115,11 +1254,11 @@ void wf_assertionFailed(uint16_t lineNumber) {
 void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
   tMgmtMsgRxHdr hdr;
 
-#ifdef WF_DEBUG
-  usart_putstr(USART1, "wf_waitForMgmtResponse: ");
-  usart_puthex8(USART1, expectedSubtype);
-  usart_putc(USART1, '\n');
-#endif
+//#ifdef WF_DEBUG
+//  usart_putstr(USART1, "wf_waitForMgmtResponse: ");
+//  usart_puthex8(USART1, expectedSubtype);
+//  usart_putc(USART1, '\n');
+//#endif
   
   g_waitingForMgmtResponse = TRUE;
 
@@ -1147,18 +1286,18 @@ void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
     }
   }
 
-#ifdef WF_DEBUG
-  usart_putstr(USART1, "wf_waitForMgmtResponse complete.\n");
-#endif
+//#ifdef WF_DEBUG
+//  usart_putstr(USART1, "wf_waitForMgmtResponse complete.\n");
+//#endif
   
   /* set this back to FALSE so the next mgmt send won't think he has a response before one is received */
   g_mgmtConfirmMsgReceived = FALSE;
 
   /* if the caller wants to delete the response immediately (doesn't need any data from it */
   if (freeAction == FREE_MGMT_BUFFER) {
-#ifdef WF_DEBUG
-    usart_putstr(USART1, "wf_waitForMgmtResponse: FREE_MGMT_BUFFER\n");
-#endif
+//#ifdef WF_DEBUG
+//    usart_putstr(USART1, "wf_waitForMgmtResponse: FREE_MGMT_BUFFER\n");
+//#endif
 
     /* read and verify result before freeing up buffer to ensure our message send was successful */
     wf_rawRead(RAW_RX_ID, 0, (uint16_t) (sizeof (tMgmtMsgRxHdr)), (uint8_t *) & hdr);
@@ -1188,9 +1327,9 @@ void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
       wf_setRawWindowState(RAW_RX_ID, WF_RAW_DATA_MOUNTED);
     }
 
-#ifdef WF_DEBUG
-    usart_putstr(USART1, "wf_waitForMgmtResponse: FREE_MGMT_BUFFER complete\n");
-#endif
+//#ifdef WF_DEBUG
+//    usart_putstr(USART1, "wf_waitForMgmtResponse: FREE_MGMT_BUFFER complete\n");
+//#endif
   }
 }
 
@@ -1226,6 +1365,11 @@ void wf_processInterruptServiceResult(void) {
 
   /* read hostInt register to determine cause of interrupt */
   hostIntRegValue = wf_read8BitWFRegister(WF_HOST_INTR_REG);
+#ifdef WF_DEBUG
+    usart_putstr(USART1, "hostIntRegValue: ");
+    usart_puthex8(USART1, hostIntRegValue);
+    usart_putc(USART1, '\n');
+#endif
 
   // OR in the saved interrupts during the time when we were waiting for raw complete, set by WFEintHandler()
   hostIntRegValue |= g_hostIntSaved;
@@ -1234,6 +1378,11 @@ void wf_processInterruptServiceResult(void) {
   g_hostIntSaved = 0;
 
   hostIntMaskRegValue = wf_read8BitWFRegister(WF_HOST_MASK_REG);
+#ifdef WF_DEBUG
+    usart_putstr(USART1, "hostIntMaskRegValue: ");
+    usart_puthex8(USART1, hostIntMaskRegValue);
+    usart_putc(USART1, '\n');
+#endif
 
   // AND the two registers together to determine which active, enabled interrupt has occurred
   hostInt = hostIntRegValue & hostIntMaskRegValue;
@@ -1254,7 +1403,9 @@ void wf_processInterruptServiceResult(void) {
   else if ((hostInt & WF_HOST_INT_MASK_FIFO_0_THRESHOLD) == WF_HOST_INT_MASK_FIFO_0_THRESHOLD) {
     /* clear this interrupt */
     wf_write8BitWFRegister(WF_HOST_INTR_REG, WF_HOST_INT_MASK_FIFO_0_THRESHOLD);
-
+#ifdef WF_DEBUG
+    usart_putstr(USART1, "g_hostRAWDataPacketReceived\n");
+#endif
     g_hostRAWDataPacketReceived = TRUE; /* this global flag is used in MACGetHeader() to determine a received data packet */
   }    // else got a Host interrupt that we don't handle
   else if (hostInt) {
@@ -1274,11 +1425,11 @@ void wf_processMgmtRxMsg(void) {
 
   /* read first byte from Mgmt Rx message (msg type) */
   wf_rawRead(RAW_RX_ID, 0, 1, &msgType);
-#ifdef WF_DEBUG
-  usart_putstr(USART1, "wf_processMgmtRxMsg: ");
-  usart_putudec(USART1, msgType);
-  usart_putc(USART1, '\n');
-#endif
+//#ifdef WF_DEBUG
+//  usart_putstr(USART1, "wf_processMgmtRxMsg: ");
+//  usart_putudec(USART1, msgType);
+//  usart_putc(USART1, '\n');
+//#endif
   
   /* if not a management response or management indicate then fatal error */
   WF_ASSERT((msgType == WF_MGMT_CONFIRM_TYPE) || (msgType == WF_MGMT_INDICATE_TYPE));
@@ -1308,11 +1459,11 @@ void wf_processMgmtIndicateMsg() {
   wf_rawRead(RAW_MGMT_RX_ID, 0, sizeof (tMgmtIndicateHdr), (uint8_t *) & hdr);
 
   /* Determine which event occurred and handle it */
-#ifdef WF_DEBUG
-  usart_putstr(USART1, "wf_processMgmtIndicateMsg: ");
-  usart_putudec(USART1, hdr.subType);
-  usart_putc(USART1, '\n');
-#endif
+//#ifdef WF_DEBUG
+//  usart_putstr(USART1, "wf_processMgmtIndicateMsg: ");
+//  usart_putudec(USART1, hdr.subType);
+//  usart_putc(USART1, '\n');
+//#endif
   switch (hdr.subType) {
       /*-----------------------------------------------------------------*/
     case WF_EVENT_CONNECTION_ATTEMPT_STATUS_SUBTYPE:
@@ -1479,15 +1630,15 @@ uint16_t wf_rawMountRxBuffer(void) {
 }
 
 void wf_rawRead(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t* p_dest) {
-#ifdef WF_DEBUG
-  usart_putstr(USART1, "wf_rawRead: ");
-  usart_puthex8(USART1, rawId);
-  usart_putstr(USART1, ", ");
-  usart_puthex8(USART1, startIndex);
-  usart_putstr(USART1, ", ");
-  usart_puthex8(USART1, length);
-  usart_putc(USART1, '\n');  
-#endif
+//#ifdef WF_DEBUG
+//  usart_putstr(USART1, "wf_rawRead: ");
+//  usart_puthex8(USART1, rawId);
+//  usart_putstr(USART1, ", ");
+//  usart_puthex8(USART1, startIndex);
+//  usart_putstr(USART1, ", ");
+//  usart_puthex8(USART1, length);
+//  usart_putc(USART1, '\n');  
+//#endif
   wf_rawSetIndex(rawId, startIndex);
   wf_rawGetByte(rawId, p_dest, length);
 }
@@ -1496,11 +1647,12 @@ void wf_rawGetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
   uint8_t regId;
 #if defined(WF_OUTPUT_RAW_TX_RX)
   uint16_t i;
-
-  usart_putstr(USART1, "wf_rawGetByte: ");
-  usart_putudec(USART1, length);
-  usart_putc(USART1, '\n');
 #endif
+//#if defined(WF_DEBUG)
+//  usart_putstr(USART1, "wf_rawGetByte: ");
+//  usart_putudec(USART1, length);
+//  usart_putc(USART1, '\n');
+//#endif
 
   /* if reading a data message do following check */
   if (!g_waitingForMgmtResponse) {
@@ -1527,11 +1679,12 @@ void wf_rawSetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
   uint8_t regId;
 #if defined(WF_OUTPUT_RAW_TX_RX)
   uint16_t i;
-
-  usart_putstr(USART1, "wf_rawSetByte: ");
-  usart_putudec(USART1, length);
-  usart_putc(USART1, '\n');
-#endif    
+#endif
+//#if defined(WF_DEBUG)
+//  usart_putstr(USART1, "wf_rawSetByte: ");
+//  usart_putudec(USART1, length);
+//  usart_putc(USART1, '\n');
+//#endif    
 
   /* if previously set index past legal range and now trying to write to RAW engine */
   if ((rawId == 0) && g_rxIndexSetBeyondBuffer && (wf_getRawWindowState(RAW_TX_ID) == WF_RAW_DATA_MOUNTED)) {
@@ -1558,13 +1711,13 @@ BOOL wf_rawSetIndex(uint16_t rawId, uint8_t index) {
   uint32_t startTickCount;
   uint32_t maxAllowedTicks;
 
-#ifdef WF_DEBUG
-  usart_putstr(USART1, "wf_rawSetIndex: ");
-  usart_puthex8(USART1, rawId);
-  usart_putstr(USART1, ", ");
-  usart_puthex8(USART1, index);
-  usart_putc(USART1, '\n');
-#endif
+//#ifdef WF_DEBUG
+//  usart_putstr(USART1, "wf_rawSetIndex: ");
+//  usart_puthex8(USART1, rawId);
+//  usart_putstr(USART1, ", ");
+//  usart_puthex8(USART1, index);
+//  usart_putc(USART1, '\n');
+//#endif
   
   // set the RAW index
   regId = (rawId == RAW_ID_0) ? RAW_0_INDEX_REG : RAW_1_INDEX_REG;
@@ -1620,13 +1773,13 @@ void wf_sendMgmtMsg(uint8_t* p_header, uint8_t headerLength, uint8_t* p_data, ui
   }
 
   /* write out management header */
-#ifdef WF_DEBUG
-  usart_putstr(USART1, "wf_sendMgmtMsg: ");
-  usart_putudec(USART1, headerLength);
-  usart_putstr(USART1, ", ");
-  usart_putudec(USART1, dataLength);
-  usart_putc(USART1, '\n');
-#endif
+//#ifdef WF_DEBUG
+//  usart_putstr(USART1, "wf_sendMgmtMsg: ");
+//  usart_putudec(USART1, headerLength);
+//  usart_putstr(USART1, ", ");
+//  usart_putudec(USART1, dataLength);
+//  usart_putc(USART1, '\n');
+//#endif
   wf_rawSetByte(RAW_TX_ID, p_header, headerLength);
 
   /* write out data (if any) */
@@ -1800,11 +1953,11 @@ BOOL wf_isMgmtTxBufAvailable(void) {
 }
 
 void wf_pushRawWindow(uint8_t rawId) {
-#ifdef WF_DEBUG
-  usart_putstr(USART1, "wf_pushRawWindow: ");
-  usart_putudec(USART1, rawId);
-  usart_putc(USART1, '\n');
-#endif
+//#ifdef WF_DEBUG
+//  usart_putstr(USART1, "wf_pushRawWindow: ");
+//  usart_putudec(USART1, rawId);
+//  usart_putc(USART1, '\n');
+//#endif
   wf_rawMove(rawId, RAW_STACK_MEM, FALSE, 0);
 }
 
@@ -2436,3 +2589,446 @@ void wf_cmConnect(uint8_t CpId) {
   /* wait for mgmt response, free after it comes in, don't need data bytes */
   wf_waitForMgmtResponse(WF_CM_CONNECT_SUBYTPE, FREE_MGMT_BUFFER);
 }
+
+uint8_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
+  uint16_t len;
+  tWFRxPreamble header;
+  uint8_t typeHigh, typeLow;
+
+  g_rxIndexSetBeyondBuffer = FALSE;
+
+  /* if we currently have a rx buffer mounted then we need to save it */
+  if (wf_getRawWindowState(RAW_RX_ID) == WF_RAW_DATA_MOUNTED) {
+    /* save state of Rx RAW window */
+    wf_pushRawWindow(RAW_RX_ID);
+  }
+
+  /* RAW 0 is now unmounted (and available) */
+  wf_setRawWindowState(RAW_RX_ID, WF_RAW_UNMOUNTED);
+
+  if (g_encPtrRAWId[ENC_RD_PTR_ID] == RAW_RX_ID) {
+    g_encPtrRAWId[ENC_RD_PTR_ID] = RAW_INVALID_ID;
+  }
+
+  if (g_encPtrRAWId[ENC_WT_PTR_ID] == RAW_RX_ID) {
+    g_encPtrRAWId[ENC_WT_PTR_ID] = RAW_INVALID_ID;
+  }
+
+  len = wf_macIFService();
+  if (len == 0) {
+    return FALSE;
+  }
+
+  /* read preamble header */
+  wf_rawRead(RAW_RX_ID, ENC_PREAMBLE_OFFSET, WF_RX_PREAMBLE_SIZE, (uint8_t *) & header);
+
+  /* as a sanity check verify that the expected bytes contain the SNAP header */
+  if (!(header.snap[0] == SNAP_VAL &&
+          header.snap[1] == SNAP_VAL &&
+          header.snap[2] == SNAP_CTRL_VAL &&
+          header.snap[3] == SNAP_TYPE_VAL &&
+          header.snap[4] == SNAP_TYPE_VAL &&
+          header.snap[5] == SNAP_TYPE_VAL)) {
+#ifdef WF_DEBUG
+  usart_putstr(USART1, "wf_macGetHeader: snap not verified\n");
+#endif
+
+    /* if a vendor proprietary packet, throw away */
+    wf_deallocateDataRxBuffer();
+    return FALSE;
+  }
+
+  // Make absolutely certain that any previous packet was discarded
+  g_wasDiscarded = TRUE;
+
+  /* we can flush any saved RAW state now by saving and restoring the current rx buffer.  */
+  wf_pushRawWindow(RAW_RX_ID);
+  wf_popRawWindow(RAW_RX_ID);
+
+  // set RAW pointer to 802.11 payload
+  wf_rawSetIndex(RAW_RX_ID, (ENC_PREAMBLE_OFFSET + WF_RX_PREAMBLE_SIZE));
+
+  g_rxBufferSize = len;
+  /////    RawWindowReady[RAW_RX_ID] = TRUE;
+  /////SetRawWindowState(RAW_RX_ID, WF_RAW_DATA_MOUNTED);   
+  g_encPtrRAWId[ENC_RD_PTR_ID] = RAW_RX_ID;
+  g_encIndex[ENC_RD_PTR_ID] = RXSTART + sizeof (ENC_PREAMBLE);
+
+  // The EtherType field, like most items transmitted on the Ethernet medium
+  // are in big endian.
+  header.Type = wf_swaps(header.Type);
+
+  // Return the Ethernet frame's Source MAC address field to the caller
+  // This parameter is useful for replying to requests without requiring an
+  // ARP cycle.
+  memcpy((void*) remote->v, (void*) header.SourceMACAddr.v, sizeof (*remote));
+
+  // Return a simplified version of the EtherType field to the caller
+  *type = MAC_UNKNOWN;
+  typeLow = header.Type & 0xff;
+  typeHigh = (header.Type >> 8) & 0xff;
+  if ((typeHigh == 0x08u) && ((typeLow == ETHER_IP) || (typeLow == ETHER_ARP))) {
+    *type = typeLow;
+  }
+#ifdef WF_DEBUG
+  usart_putstr(USART1, "wf_macGetHeader type:");
+  usart_puthex8(USART1, *type);
+  usart_putc(USART1, '\n');
+#endif
+
+  // Mark this packet as discardable
+  g_wasDiscarded = FALSE;
+
+  return TRUE;
+}
+
+uint16_t wf_macIFService(void) {
+  uint16_t byteCount = 0; /* num bytes returned */
+  tRxPreamble wfPreamble;
+
+  // if no rx data packet to process or not yet finished with mgmt rx processing
+  // TODO  if (!g_hostRAWDataPacketReceived) {
+  // TODO    return byteCount;
+  // TODO  }
+
+  /* if made it here then External interrupt has signalled a data packet has been received */
+  // TODO  g_hostRAWDataPacketReceived = FALSE; /* clear flag for next data packet */
+
+  /* Mount Read FIFO to RAW Rx window.  Allows use of RAW engine to read rx data packet. */
+  /* Function call returns number of bytes in the data packet.                           */
+  byteCount = wf_rawMountRxBuffer();
+  if(byteCount == 0) {
+    return 0;
+  }
+  // TODO WF_ASSERT(byteCount > 0); /* byte count should never be 0 */
+
+  // now that buffer mounted it is safe to reenable interrupts
+  // TODO: WF_EintEnable();
+
+  wf_rawGetByte(RAW_RX_ID, (uint8_t*) & wfPreamble, sizeof (tRxPreamble));
+  WF_ASSERT(wfPreamble.type == WF_DATA_RX_INDICATE_TYPE);
+
+#ifdef WF_DEBUG
+  usart_putstr(USART1, "wf_macIFService result:");
+  usart_putudec(USART1, byteCount);
+  usart_putc(USART1, '\n');
+#endif
+  return byteCount;
+}
+
+uint16_t wf_swaps(uint16_t v) {
+  return ((v >> 8) & 0xff) | ((v << 8) & 0xff00);
+}
+
+uint8_t wf_macIsTxReady(void) {
+  uint8_t result = TRUE;
+
+  /* if waiting for a management response then block data tx until */
+  /* mgmt response received                                        */
+  if (wf_isRawRxMgmtInProgress()) {
+    wf_process(); // allow mgmt message to be received (stack can call this
+    // function in an infinite loop so need to allow WiFi state
+    // machines to run.
+    return FALSE;
+  }
+
+  if (!g_rawWindowReady[RAW_TX_ID]) {
+    wf_setRawWindowState(RAW_TX_ID, WF_RAW_UNMOUNTED);
+
+    if (g_encPtrRAWId[ENC_RD_PTR_ID] == RAW_TX_ID) {
+      g_encPtrRAWId[ENC_RD_PTR_ID] = RAW_INVALID_ID;
+    }
+
+    if (g_encPtrRAWId[ENC_WT_PTR_ID] == RAW_TX_ID) {
+      g_encPtrRAWId[ENC_WT_PTR_ID] = RAW_INVALID_ID;
+    }
+
+    // create the new tx buffer
+    if (!wf_allocateDataTxBuffer(MCHP_DATA_PACKET_SIZE)) {
+      result = FALSE;
+    }
+  }
+
+  return result;
+}
+
+uint32_t wf_macSetWritePtr(uint32_t address) {
+  uint32_t oldVal;
+
+  oldVal = g_encIndex[ENC_WT_PTR_ID];
+
+  g_encIndex[ENC_WT_PTR_ID] = address;
+
+  wf_syncENCPtrRAWState(ENC_WT_PTR_ID);
+
+  return oldVal;
+}
+
+void wf_macPutHeader(MAC_ADDR *remote, uint8_t type, uint16_t dataLen) {
+  uint8_t buf[14];
+  g_txBufferFlushed = FALSE;
+  g_txPacketLength = dataLen + (uint16_t)sizeof (ETHER_HEADER) + WF_TX_PREAMBLE_SIZE;
+
+  // Set the SPI write pointer to the beginning of the transmit buffer (post WF_TX_PREAMBLE_SIZE)
+  g_encIndex[ENC_WT_PTR_ID] = TXSTART + WF_TX_PREAMBLE_SIZE;
+  wf_syncENCPtrRAWState(ENC_WT_PTR_ID);
+
+  /*  write the Ethernet destination address to buffer (6 bytes) */
+  memcpy(&buf[0], (void *) remote, sizeof (*remote));
+  /* write snap header to buffer (6 bytes) */
+  buf[6] = SNAP_VAL;
+  buf[7] = SNAP_VAL;
+  buf[8] = SNAP_CTRL_VAL;
+  buf[9] = SNAP_TYPE_VAL;
+  buf[10] = SNAP_TYPE_VAL;
+  buf[11] = SNAP_TYPE_VAL;
+  /* Write the appropriate Ethernet Type WORD for the protocol being used */
+  buf[12] = 0x08;
+  buf[13] = (type == MAC_IP) ? ETHER_IP : ETHER_ARP;
+
+  /* write buffer to RAW window */
+  wf_macPutArray((uint8_t *) buf, sizeof (buf));
+}
+
+void wf_macPutArray(uint8_t *val, uint16_t len) {
+  if (g_encPtrRAWId[ENC_WT_PTR_ID] == RAW_INVALID_ID) {
+    wf_syncENCPtrRAWState(ENC_WT_PTR_ID);
+  }
+
+  wf_rawSetByte(g_encPtrRAWId[ENC_WT_PTR_ID], val, len);
+
+  g_encIndex[ENC_WT_PTR_ID] += len;
+}
+
+void wf_macFlush(void) {
+  /* this function should not be called if no tx buffer is ready to transmit */
+  WF_ASSERT(g_rawWindowReady[RAW_TX_ID]);
+
+  /* this function should not be called after the current tx buffer has been transmitted */
+  WF_ASSERT(!g_txBufferFlushed);
+
+  g_txBufferFlushed = TRUE;
+
+  /* If the RAW engine is not currently mounted */
+  if (wf_getRawWindowState(RAW_TX_ID) != WF_RAW_DATA_MOUNTED) {
+    /* then it must have been saved, so pop it */
+    wf_popRawWindow(RAW_TX_ID);
+  }
+
+  // at this point the txbuffer should be mounted and ready to go
+
+  /* can't send a tx packet of 0 bytes! */
+  WF_ASSERT(g_txPacketLength != 0);
+
+  /* Ensure the MRF24W is awake (only applies if PS-Poll was enabled) */
+  wf_ensureWFisAwake();
+  wf_sendRAWDataFrame(g_txPacketLength);
+
+  // make sure to de-sync any affected pointers
+  if (g_encPtrRAWId[ENC_RD_PTR_ID] == RAW_TX_ID) {
+    g_encPtrRAWId[ENC_RD_PTR_ID] = RAW_INVALID_ID;
+  }
+
+  if (g_encPtrRAWId[ENC_WT_PTR_ID] == RAW_TX_ID) {
+    g_encPtrRAWId[ENC_WT_PTR_ID] = RAW_INVALID_ID;
+  }
+}
+
+void wf_sendRAWDataFrame(uint16_t bufLen) {
+  uint8_t txDataPreamble[4] = {WF_DATA_REQUEST_TYPE, WF_STD_DATA_MSG_SUBTYPE, 1, 0};
+
+  wf_rawWrite(RAW_TX_ID, 0, sizeof (txDataPreamble), txDataPreamble);
+
+  wf_rawSendTxBuffer(bufLen);
+}
+
+BOOL wf_isRawRxMgmtInProgress(void) {
+  return g_mgmtRxInProgress; // RawMgtmAppWaiting flag not needed and was causing problems
+}
+
+BOOL wf_allocateDataTxBuffer(uint16_t bytesNeeded) {
+  uint16_t bufAvail;
+  uint16_t byteCount;
+
+  /* Ensure the MRF24W is awake (only applies if PS-Poll was enabled) */
+  wf_ensureWFisAwake();
+
+  /* get total bytes available for DATA tx memory pool */
+  bufAvail = wf_read16BitWFRegister(WF_HOST_WFIFO_BCNT0_REG) & 0x0fff; /* LS 12 bits contain length */
+
+  /* if enough bytes available to allocate */
+  if (bufAvail >= bytesNeeded) {
+    /* allocate and create the new Tx buffer (mgmt or data) */
+    byteCount = wf_rawMove(RAW_TX_ID, RAW_DATA_POOL, TRUE, bytesNeeded);
+    WF_ASSERT(byteCount != 0);
+  }    /* else not enough bytes available at this time to satisfy request */
+  else {
+    return FALSE;
+  }
+
+  g_rawWindowReady[RAW_TX_ID] = TRUE;
+  wf_setRawWindowState(RAW_TX_ID, WF_RAW_DATA_MOUNTED);
+
+  return TRUE;
+}
+
+void wf_syncENCPtrRAWState(uint8_t encPtrId) {
+  uint8_t rawId;
+  uint16_t rawIndex;
+  uint16_t byteCount;
+  uint32_t startTickCount;
+  uint32_t maxAllowedTicks;
+
+  wf_ensureWFisAwake();
+
+  /*----------------------------------------------------*/
+  /* if encPtr[encPtrId] in the enc rx or enc tx buffer */
+  /*----------------------------------------------------*/
+  if (g_encIndex[encPtrId] < BASE_SCRATCH_ADDR/*BASE_TCB_ADDR*/) {
+    /*--------------------------------------*/
+    /* if encPtr[encPtrId] in enc Rx buffer */
+    /*--------------------------------------*/
+    if (g_encIndex[encPtrId] < TXSTART) {
+      /* set the rawId */
+      rawId = RAW_RX_ID;
+
+      /* Convert encPtr index to Raw Index */
+      rawIndex = g_encIndex[encPtrId] - ENC_RX_BUF_TO_RAW_RX_BUF_ADJUSTMENT;
+
+      // encPtr[encPtrId] < (RXSTART + ENC_PREAMBLE_SIZE) is an error since we don't have
+      // the same preamble as the ENC chip
+      WF_ASSERT(g_encIndex[encPtrId] >= (RXSTART + ENC_PREAMBLE_SIZE));
+    }      /*----------------------------------------*/
+      /* else encPtr[encPtrId] in enc Tx buffer */
+      /*----------------------------------------*/
+    else {
+      /* if the Tx data raw window has not yet been allocated (the stack is accessing a new Tx data packet) */
+      if (!g_rawWindowReady[RAW_TX_ID]) {
+        /* Before we enter the while loop, get the tick timer count and save it */
+        maxAllowedTicks = 2 * 1000; /* 2 second timeout, needed if data traffic and scanning occurring */
+        startTickCount = systick_uptime();
+
+        /* Retry until MRF24W has drained it's prior TX pkts -  multiple sockets & flows can load the MRF24W10 */
+        /* The AllocateDataTxBuffer call may not succeed immediately.                                              */
+        while (!wf_allocateDataTxBuffer(MCHP_DATA_PACKET_SIZE)) {
+          /* If timed out than lock up */
+          if (systick_uptime() - startTickCount >= maxAllowedTicks) {
+            WF_ASSERT(FALSE); /* timeout occurred */
+          }
+        } /* end while */
+      }
+
+      /* set the rawId */
+      rawId = RAW_TX_ID;
+
+      /* convert enc Ptr index to raw index */
+      rawIndex = g_encIndex[encPtrId] - ENC_TX_BUF_TO_RAW_TX_BUF_ADJUSTMENT;
+
+      /* encPtr[encPtrId] < BASE_TX_ADDR is an error since we don't have the same  */
+      /* pre-BASE_TX_ADDR or post tx buffer as the ENC chip                        */
+      WF_ASSERT((g_encIndex[encPtrId] >= BASE_TX_ADDR) && (g_encIndex[encPtrId] <= (BASE_TX_ADDR + MAX_PACKET_SIZE)));
+    }
+
+
+    /* Buffer should always be ready and enc pointer should always be valid. */
+    /* For the RX buffer this assert can only happen before we have received */
+    /* the first data packet.  For the TX buffer this could only be the case */
+    /* after a macflush() where we couldn't re-mount a new buffer and before */
+    /* a macistxready() that successfully re-mounts a new tx buffer.         */
+    WF_ASSERT(g_rawWindowReady[rawId]);
+
+    /*-----------------------------------------------------------------------------*/
+    /* if the RAW buffer is ready but not mounted, or to put it another way, if    */
+    /* the RAW buffer was saved, needs to be restored, and it is OK to restore it. */
+    /*-----------------------------------------------------------------------------*/
+    if (wf_getRawWindowState(rawId) != WF_RAW_DATA_MOUNTED) {
+      /* if the buffer is not mounted then it must be restored from Mem       */
+      /* a side effect is that if the scratch buffer was mounted in the raw   */
+      /* then it will no longer be mounted                                    */
+      byteCount = wf_popRawWindow(rawId);
+      WF_ASSERT(byteCount > 0);
+
+      // set the buffer state
+      wf_setRawWindowState(rawId, WF_RAW_DATA_MOUNTED);
+    }
+  }
+    /*------------------------------------------------*/
+    /* else encPtr[encPtrId] is in the enc tcb buffer */
+    /*------------------------------------------------*/
+  else {
+    /* if Rx Raw Window already mounted onto Scratch */
+    if (wf_getRawWindowState(RAW_RX_ID) == WF_SCRATCH_MOUNTED) {
+      rawId = RAW_RX_ID;
+    }      /* else if Tx Raw Window already mounted onto Scratch */
+    else if (wf_getRawWindowState(RAW_TX_ID) == WF_SCRATCH_MOUNTED) {
+      rawId = RAW_TX_ID;
+    }      /* else Scratch not yet mounted, so need to decide which RAW window to use */
+    else {
+      if ((g_encPtrRAWId[1 - encPtrId]) == RAW_RX_ID) {
+        /* use the Tx RAW window to write to scratch */
+        rawId = RAW_TX_ID;
+      } else {
+        // the other enc pointer is in use in the tx buffer raw or invalid
+        // so use the rx buffer raw to mount the scratch buffer
+
+        // set the rawId
+        rawId = RAW_RX_ID;
+      }
+
+      // if we currently have a buffer mounted then we need to save it
+      // need to check for both data and mgmt packets
+      if ((wf_getRawWindowState(rawId) == WF_RAW_DATA_MOUNTED) || (wf_getRawWindowState(rawId) == WF_RAW_MGMT_MOUNTED)) {
+        wf_pushRawWindow(rawId);
+      }
+
+      // mount the scratch window in the selected raw
+      if (wf_scratchMount(rawId) == 0) {
+        /* work-around, somehow the scratch was already mounted to the other raw window */
+        rawId = !rawId;
+      }
+    }
+
+    /* convert Enc ptr index to raw index */
+    rawIndex = g_encIndex[encPtrId] - ENC_TCB_BUF_TO_RAW_SCRATCH_BUF_ADJUSTMENT;
+  }
+
+
+  /* Set RAW index. If false is returned this means that index set beyond end of raw window, which */
+  /* is OK so long as no read or write access is attempted, hence the flag setting.                */
+  if (wf_rawSetIndex(rawId, rawIndex) == FALSE) {
+    if (rawId == RAW_RX_ID) {
+      g_rxIndexSetBeyondBuffer = TRUE;
+    }
+  } else {
+    if (rawId == RAW_RX_ID) {
+      g_rxIndexSetBeyondBuffer = FALSE;
+    }
+  }
+
+  // if we fail the set index we should...
+  // use a case statement to determine the object that is mounted (rawId==0, could be rxbuffer object or scratch object)
+  // (rawId==1, could be txbuffer or scratch object
+  // dismount the object in the appropriate manner (rxbuffer ... save operation, txbuffer save operation, scratch save operation)
+  // set the index to 0
+  // mark the RawWindowState[rawId] = WF_RAW_UNMOUNTED
+  // mark the g_encPtrRAWId[encPtrId] = RAW_INVALID_ID
+
+
+  // set the g_encPtrRAWId
+  g_encPtrRAWId[encPtrId] = rawId;
+
+  // if the opposite encPtr was pointing to the raw window
+  // that was re-configured by this routine then it is
+  // no longer in sync
+  if (g_encPtrRAWId[1 - encPtrId] == g_encPtrRAWId[encPtrId]) {
+    g_encPtrRAWId[1 - encPtrId] = RAW_INVALID_ID;
+  }
+}
+
+void wf_rawWrite(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t *p_src) {
+  /*set raw index in dest memory */
+  wf_rawSetIndex(rawId, startIndex);
+
+  /* write data to RAW window */
+  wf_rawSetByte(rawId, p_src, length);
+} 

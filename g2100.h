@@ -90,6 +90,26 @@ extern "C" {
 #define WF_ACTIVE_SCAN   (1)
 #define WF_PASSIVE_SCAN  (2)
 
+#define MAC_IP      	(0x00u)
+#define MAC_ARP     	(0x06u)
+#define MAC_UNKNOWN 	(0xFFu)
+
+  // Memory addresses
+#define RESERVED_CRYPTO_MEMORY          (128ul)
+#define RAMSIZE                         (24 * 1024ul)
+#define TXSTART                         (0x0000ul)
+#define TCP_ETH_RAM_SIZE 0
+#define RESERVED_HTTP_MEMORY 0
+#define RESERVED_SSL_MEMORY 0
+#define RXSTART                         ((TXSTART + 1518ul + TCP_ETH_RAM_SIZE + RESERVED_HTTP_MEMORY + RESERVED_SSL_MEMORY + RESERVED_CRYPTO_MEMORY + 1ul) & 0xFFFE)
+#define	RXSTOP                          (RAMSIZE - 1ul)
+#define RXSIZE                          (RXSTOP - RXSTART + 1ul)
+#define BASE_TX_ADDR                    (TXSTART)
+#define BASE_SCRATCH_ADDR               (BASE_TX_ADDR + 1518ul)
+#define BASE_HTTPB_ADDR                 (BASE_SCRATCH_ADDR + TCP_ETH_RAM_SIZE)
+#define BASE_SSLB_ADDR                  (BASE_HTTPB_ADDR + RESERVED_HTTP_MEMORY)
+#define BASE_CRYPTOB_ADDR               (BASE_SSLB_ADDR + RESERVED_SSL_MEMORY)
+
   /**
    * Scan Results
    */
@@ -146,12 +166,80 @@ extern "C" {
 
   } tWFScanResult;
 
+  /**
+   * Structure to contain a MAC address
+   */
+  typedef struct __attribute__((__packed__)) {
+    uint8_t v[6];
+  }
+  MAC_ADDR;
+
   extern uint8_t wf_connected;
 
   extern void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
 
   void wf_init();
   void wf_isr();
+
+  /**
+   * Returns the ECON1.TXRTS bit
+   * 
+   * @return TRUE: If no Ethernet transmission is in progress
+   *         FALSE: If a previous transmission was started, and it has
+   *                 not completed yet.  While FALSE, the data in the
+   *                 transmit buffer and the TXST/TXND pointers must not
+   *                 be changed.
+   */
+  uint8_t wf_macIsTxReady(void);
+
+  /**
+   * SPI write pointer is updated.  All calls to
+   *   MACPut() and MACPutArray() will use this new value.
+   * 
+   * @param address Address to seek to
+   * @return Old EWRPT location
+   */
+  uint32_t wf_macSetWritePtr(uint32_t address);
+
+  /**
+   * Because of the dataLen parameter, it is probably
+   *                  advantagous to call this function immediately before
+   *                  transmitting a packet rather than initially when the
+   *                  packet is first created.  The order in which the packet
+   *                  is constructed (header first or data first) is not
+   *                  important.
+   * 
+   * @param remote Pointer to memory which contains the destination
+   *                           MAC address (6 bytes)
+   * @param type The constant ETHER_ARP or ETHER_IP, defining which
+   *                        value to write into the Ethernet header's type field.
+   * @param dataLen Length of the Ethernet data payload
+   */
+  void wf_macPutHeader(MAC_ADDR *remote, uint8_t type, uint16_t dataLen);
+
+  /**
+   * MACPutArray writes several sequential bytes to the
+   *                  MRF24W RAM.  It performs faster than multiple MACPut()
+   *                  calls.  EWRPT is incremented by len.
+   * 
+   * @param val Pointer to source of bytes to copy.
+   * @param len Number of bytes to write to the data buffer.
+   */
+  void wf_macPutArray(uint8_t *val, uint16_t len);
+
+  /**
+   * MACFlush causes the current TX packet to be sent out on
+   *                  the Ethernet medium.  The hardware MAC will take control
+   *                  and handle CRC generation, collision retransmission and
+   *                  other details.
+   * 
+   * After transmission completes (MACIsTxReady() returns TRUE),
+   *                  the packet can be modified and transmitted again by calling
+   *                  MACFlush() again.  Until MACPutHeader() or MACPut() is
+   *                  called (in the TX data area), the data in the TX buffer
+   *                  will not be corrupted.
+   */
+  void wf_macFlush(void);
 
   /**
    * /brief Commands the MRF24W to start a scan operation.  This will generate the WF_EVENT_SCAN_RESULTS_READY event.
@@ -216,6 +304,19 @@ extern "C" {
   void wf_setFuncState(uint8_t funcMask, uint8_t state);
 
   void wf_getMacAddress(uint8_t* buf);
+
+  /**
+   * 
+   * @param remote Location to store the Source MAC address of the received frame.
+   * @param type Location of a BYTE to store the constant
+   *                         MAC_UNKNOWN, ETHER_IP, or ETHER_ARP, representing
+   *                         the contents of the Ethernet type field.
+   * @return TRUE: If a packet was waiting in the RX buffer.  The
+   *                        remote, and type values are updated.
+   *         FALSE: If a packet was not pending.  remote and type are
+   *                         not changed.
+   */
+  uint8_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type);
 
   /**
    * Called form main loop to support 802.11 operations
