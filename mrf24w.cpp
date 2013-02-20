@@ -62,7 +62,7 @@ void Mrf24w::connect() {
   connectionProfileId = wf_cpCreate();
   ASSERT(connectionProfileId != 0xff);
   wf_cpSetSsid(connectionProfileId, (uint8_t*) m_ssid, strlen(m_ssid));
-  wf_cpSetNetworkType(connectionProfileId, WF_INFRASTRUCTURE);
+  wf_cpSetNetworkType(connectionProfileId, m_wirelessMode);
   wf_caSetScanType(WF_ACTIVE_SCAN);
   wf_caSetChannelList(channelList, sizeof (channelList));
   wf_caSetListRetryCount(10);

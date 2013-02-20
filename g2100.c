@@ -213,10 +213,6 @@ void usart_puthex16(usart_dev* dev, uint16_t value) {
 
 #define RAW_ID_0                        (0)
 #define RAW_ID_1                        (1)
-#define RAW_ID_2                        (2)
-#define RAW_ID_3                        (3)
-#define RAW_ID_4                        (4)
-#define RAW_ID_5                        (5)
 
 // RAW0 used for Rx, RAW1 used for Tx
 #define RAW_RX_ID                       RAW_ID_0
@@ -1679,12 +1675,13 @@ void wf_rawSetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
   uint8_t regId;
 #if defined(WF_OUTPUT_RAW_TX_RX)
   uint16_t i;
+  usart_putstr(USART1, "wf_rawSetByte: ");
+  for (i = 0; i < length; ++i) {
+    usart_puthex8(USART1, pBuffer[i]);
+    usart_putc(USART1, ' ');
+  }
+  usart_putc(USART1, '\n');
 #endif
-//#if defined(WF_DEBUG)
-//  usart_putstr(USART1, "wf_rawSetByte: ");
-//  usart_putudec(USART1, length);
-//  usart_putc(USART1, '\n');
-//#endif    
 
   /* if previously set index past legal range and now trying to write to RAW engine */
   if ((rawId == 0) && g_rxIndexSetBeyondBuffer && (wf_getRawWindowState(RAW_TX_ID) == WF_RAW_DATA_MOUNTED)) {
@@ -2229,6 +2226,18 @@ uint16_t wf_rawMove(uint16_t rawId, uint16_t srcDest, BOOL rawIsDestination, uin
   regValue8 = (rawId == RAW_ID_0) ? WF_HOST_INT_MASK_RAW_0_INT_0 : WF_HOST_INT_MASK_RAW_1_INT_0;
   wf_write8BitWFRegister(WF_HOST_INTR_REG, regValue8);
 
+  /* 
+  These variables are shared with the ISR so need to be careful when setting them.
+  the WFEintHandler() is the isr that will touch these variables but will only touch
+  them if RawMoveState.waitingForRawMoveCompleteInterrupt is set to TRUE.
+  RawMoveState.waitingForRawMoveCompleteInterrupt is only set TRUE here and only here.
+  so as long as we set RawMoveState.rawInterrupt first and then set RawMoveState.waitingForRawMoveCompleteInterrupt 
+  to TRUE, we are guranteed that the ISR won't touch RawMoveState.rawInterrupt and 
+  RawMoveState.waitingForRawMoveCompleteInterrupt. 
+  */
+  g_rawMoveState.rawInterrupt  = 0;  
+  g_rawMoveState.waitingForRawMoveCompleteInterrupt = TRUE;
+  
   /* write update control value to register to control register */
   regId = (rawId == RAW_ID_0) ? RAW_0_CTRL_0_REG : RAW_1_CTRL_0_REG;
   wf_write16BitWFRegister(regId, ctrlVal);
@@ -2252,18 +2261,6 @@ uint16_t wf_waitForRawMoveComplete(uint8_t rawId) {
   /* create mask to check against for Raw Move complete interrupt for either RAW0 or RAW1 */
   rawIntMask = (rawId == RAW_ID_0) ? WF_HOST_INT_MASK_RAW_0_INT_0 : WF_HOST_INT_MASK_RAW_1_INT_0;
 
-  /* 
-  These variables are shared with the ISR so need to be careful when setting them.
-  the WFEintHandler() is the isr that will touch these variables but will only touch
-  them if RawMoveState.waitingForRawMoveCompleteInterrupt is set to TRUE.
-  RawMoveState.waitingForRawMoveCompleteInterrupt is only set TRUE here and only here.
-  so as long as we set RawMoveState.rawInterrupt first and then set RawMoveState.waitingForRawMoveCompleteInterrupt 
-  to TRUE, we are guranteed that the ISR won't touch RawMoveState.rawInterrupt and 
-  RawMoveState.waitingForRawMoveCompleteInterrupt. 
-  */
-  g_rawMoveState.rawInterrupt  = 0;  
-  g_rawMoveState.waitingForRawMoveCompleteInterrupt = TRUE;
-
   // save state of external interrupt here
   // TODO: intDisabled = WF_EintIsDisabled();
   
@@ -2276,7 +2273,7 @@ uint16_t wf_waitForRawMoveComplete(uint8_t rawId) {
 
   #if defined(WF_DEBUG)
     // Before we enter the while loop, get the tick timer count and save it
-    maxAllowedTicks = 500;  /* 500 ms timeout */
+    maxAllowedTicks = 5 * 1000;  /* 500 ms timeout */
     startTickCount = systick_uptime();
   #endif
   while (1)
@@ -2291,6 +2288,7 @@ uint16_t wf_waitForRawMoveComplete(uint8_t rawId) {
       /* If timed out waiting for RAW Move complete than lock up */
       if (systick_uptime() - startTickCount >= maxAllowedTicks) {
           WF_ASSERT(FALSE);
+          break; // TODO: this shouldn't happen
       }
     #endif
   } /* end while */
@@ -2590,7 +2588,7 @@ void wf_cmConnect(uint8_t CpId) {
   wf_waitForMgmtResponse(WF_CM_CONNECT_SUBYTPE, FREE_MGMT_BUFFER);
 }
 
-uint8_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
+uint16_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
   uint16_t len;
   tWFRxPreamble header;
   uint8_t typeHigh, typeLow;
@@ -2616,11 +2614,36 @@ uint8_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
 
   len = wf_macIFService();
   if (len == 0) {
-    return FALSE;
+    return 0;
   }
 
   /* read preamble header */
+#ifdef WF_DEBUG
+  usart_putstr(USART1, "wf_rawRead: begin\n");
+#endif
   wf_rawRead(RAW_RX_ID, ENC_PREAMBLE_OFFSET, WF_RX_PREAMBLE_SIZE, (uint8_t *) & header);
+#ifdef WF_DEBUG
+  usart_putstr(USART1, "wf_rawRead: complete\n");
+  usart_putstr(USART1, "DestMACAddr: ");
+  usart_puthex8(USART1, header.DestMACAddr.v[0]);
+  usart_puthex8(USART1, header.DestMACAddr.v[1]);
+  usart_puthex8(USART1, header.DestMACAddr.v[2]);
+  usart_puthex8(USART1, header.DestMACAddr.v[3]);
+  usart_puthex8(USART1, header.DestMACAddr.v[4]);
+  usart_puthex8(USART1, header.DestMACAddr.v[5]);
+  usart_putstr(USART1, "\n");
+  usart_putstr(USART1, "SourceMACAddr: ");
+  usart_puthex8(USART1, header.SourceMACAddr.v[0]);
+  usart_puthex8(USART1, header.SourceMACAddr.v[1]);
+  usart_puthex8(USART1, header.SourceMACAddr.v[2]);
+  usart_puthex8(USART1, header.SourceMACAddr.v[3]);
+  usart_puthex8(USART1, header.SourceMACAddr.v[4]);
+  usart_puthex8(USART1, header.SourceMACAddr.v[5]);
+  usart_putstr(USART1, "\n");
+  usart_putstr(USART1, "Type: ");
+  usart_puthex8(USART1, header.Type);
+  usart_putstr(USART1, "\n");
+#endif
 
   /* as a sanity check verify that the expected bytes contain the SNAP header */
   if (!(header.snap[0] == SNAP_VAL &&
@@ -2642,11 +2665,15 @@ uint8_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
   g_wasDiscarded = TRUE;
 
   /* we can flush any saved RAW state now by saving and restoring the current rx buffer.  */
+  usart_putstr(USART1, "wf_pushRawWindow\n");
   wf_pushRawWindow(RAW_RX_ID);
+  usart_putstr(USART1, "wf_popRawWindow\n");
   wf_popRawWindow(RAW_RX_ID);
 
   // set RAW pointer to 802.11 payload
+  usart_putstr(USART1, "wf_rawSetIndex\n");
   wf_rawSetIndex(RAW_RX_ID, (ENC_PREAMBLE_OFFSET + WF_RX_PREAMBLE_SIZE));
+  usart_putstr(USART1, "wf_rawSetIndex: done\n");
 
   g_rxBufferSize = len;
   /////    RawWindowReady[RAW_RX_ID] = TRUE;
@@ -2679,7 +2706,7 @@ uint8_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
   // Mark this packet as discardable
   g_wasDiscarded = FALSE;
 
-  return TRUE;
+  return len;
 }
 
 uint16_t wf_macIFService(void) {
@@ -2687,32 +2714,41 @@ uint16_t wf_macIFService(void) {
   tRxPreamble wfPreamble;
 
   // if no rx data packet to process or not yet finished with mgmt rx processing
-  // TODO  if (!g_hostRAWDataPacketReceived) {
-  // TODO    return byteCount;
-  // TODO  }
+  if (!g_hostRAWDataPacketReceived) {
+    return byteCount;
+  }
 
   /* if made it here then External interrupt has signalled a data packet has been received */
-  // TODO  g_hostRAWDataPacketReceived = FALSE; /* clear flag for next data packet */
+  g_hostRAWDataPacketReceived = FALSE; /* clear flag for next data packet */
 
   /* Mount Read FIFO to RAW Rx window.  Allows use of RAW engine to read rx data packet. */
   /* Function call returns number of bytes in the data packet.                           */
   byteCount = wf_rawMountRxBuffer();
+#ifdef WF_DEBUG
+  usart_putstr(USART1, "wf_macIFService result:");
+  usart_putudec(USART1, byteCount);
+  usart_putc(USART1, '\n');
+#endif
   if(byteCount == 0) {
     return 0;
   }
-  // TODO WF_ASSERT(byteCount > 0); /* byte count should never be 0 */
+  WF_ASSERT(byteCount > 0); /* byte count should never be 0 */
 
   // now that buffer mounted it is safe to reenable interrupts
   // TODO: WF_EintEnable();
 
   wf_rawGetByte(RAW_RX_ID, (uint8_t*) & wfPreamble, sizeof (tRxPreamble));
   WF_ASSERT(wfPreamble.type == WF_DATA_RX_INDICATE_TYPE);
-
 #ifdef WF_DEBUG
-  usart_putstr(USART1, "wf_macIFService result:");
-  usart_putudec(USART1, byteCount);
+  usart_putstr(USART1, "wfPreamble.type:");
+  usart_putudec(USART1, wfPreamble.type);
+  usart_putc(USART1, '\n');
+
+  usart_putstr(USART1, "wfPreamble.subType:");
+  usart_putudec(USART1, wfPreamble.subType);
   usart_putc(USART1, '\n');
 #endif
+
   return byteCount;
 }
 
@@ -2837,6 +2873,12 @@ void wf_macFlush(void) {
 void wf_sendRAWDataFrame(uint16_t bufLen) {
   uint8_t txDataPreamble[4] = {WF_DATA_REQUEST_TYPE, WF_STD_DATA_MSG_SUBTYPE, 1, 0};
 
+#ifdef WF_DEBUG
+  usart_putstr(USART1, "wf_sendRAWDataFrame: ");
+  usart_putudec(USART1, bufLen);
+  usart_putc(USART1, '\n');
+#endif
+  
   wf_rawWrite(RAW_TX_ID, 0, sizeof (txDataPreamble), txDataPreamble);
 
   wf_rawSendTxBuffer(bufLen);
@@ -3031,4 +3073,30 @@ void wf_rawWrite(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t *p
 
   /* write data to RAW window */
   wf_rawSetByte(rawId, p_src, length);
-} 
+}
+
+uint16_t wf_macGetArray(uint8_t *val, uint16_t len) {
+  uint16_t i = 0;
+  uint8_t byte;
+
+  if (g_encPtrRAWId[ENC_RD_PTR_ID] == RAW_INVALID_ID) {
+    wf_syncENCPtrRAWState(ENC_RD_PTR_ID);
+  }
+
+  if (val) {
+    wf_rawGetByte(g_encPtrRAWId[ENC_RD_PTR_ID], val, len);
+  } else {
+    // Read the data
+    while (i < len) {
+      wf_rawGetByte(g_encPtrRAWId[ENC_RD_PTR_ID], &byte, 1);
+      i++;
+    }
+  }
+  g_encIndex[ENC_RD_PTR_ID] += len;
+
+  return len;
+}
+
+void wf_macDiscardRx(void) {
+  g_wasDiscarded = TRUE;
+}

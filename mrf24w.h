@@ -8,6 +8,7 @@
 #include "g2100.h"
 extern "C" {
 #include "uip/uip.h"
+#include "uip/uip_arp.h"
 }
 
 typedef void (*Mrf24wProcessEvent)(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);

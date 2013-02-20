@@ -311,12 +311,35 @@ extern "C" {
    * @param type Location of a BYTE to store the constant
    *                         MAC_UNKNOWN, ETHER_IP, or ETHER_ARP, representing
    *                         the contents of the Ethernet type field.
-   * @return TRUE: If a packet was waiting in the RX buffer.  The
-   *                        remote, and type values are updated.
-   *         FALSE: If a packet was not pending.  remote and type are
-   *                         not changed.
+   * @return If a packet was waiting in the RX buffer.  The
+   *          remote, and type values are updated and the size is returned.
+   *         If a packet was not pending.  remote and type are not changed and 0 is returned.
    */
-  uint8_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type);
+  uint16_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type);
+
+  /**
+   * Burst reads several sequential bytes from the data buffer
+   *                  and places them into local memory.  With SPI burst support,
+   *                  it performs much faster than multiple MACGet() calls.
+   *                  ERDPT is incremented after each byte, following the same
+   *                  rules as MACGet().
+   * 
+   * @param val Pointer to storage location
+   * @param len Number of bytes to read from the data buffer
+   * @return Byte(s) of data read from the data buffer.
+   */
+  uint16_t wf_macGetArray(uint8_t *val, uint16_t len);
+
+  /**
+   * Marks the last received packet (obtained using
+   *                  MACGetHeader())as being processed and frees the buffer
+   *                  memory associated with it
+   * 
+   * It is safe to call this function multiple times between
+   *                  MACGetHeader() calls.  Extra packets won't be thrown away
+   *                  until MACGetHeader() makes it available.
+   */
+  void wf_macDiscardRx(void);
 
   /**
    * Called form main loop to support 802.11 operations
