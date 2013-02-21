@@ -2855,7 +2855,12 @@ void wf_macFlush(void) {
 
   /* can't send a tx packet of 0 bytes! */
   WF_ASSERT(g_txPacketLength != 0);
-
+#ifdef WF_DEBUG
+  usart_putstr(USART1, "g_txPacketLength: ");
+  usart_putudec(USART1, g_txPacketLength);
+  usart_putc(USART1, '\n');
+#endif
+  
   /* Ensure the MRF24W is awake (only applies if PS-Poll was enabled) */
   wf_ensureWFisAwake();
   wf_sendRAWDataFrame(g_txPacketLength);

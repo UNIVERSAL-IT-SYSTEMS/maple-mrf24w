@@ -111,7 +111,7 @@ struct arp_hdr {
   u16_t sipaddr[2];
   struct uip_eth_addr dhwaddr;
   u16_t dipaddr[2];
-};
+} __packed;
 
 #define ARP_REQUEST 1
 #define ARP_REPLY   2
