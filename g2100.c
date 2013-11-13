@@ -11,7 +11,7 @@
 #include <libmaple/systick.h>
 
 #define WF_DEBUG
-//#define WF_OUTPUT_RAW_TX_RX
+#define WF_OUTPUT_RAW_TX_RX
 
 typedef enum _BOOL {
   FALSE = 0,
@@ -578,7 +578,7 @@ typedef struct {
   MAC_ADDR DestMACAddr;
   MAC_ADDR SourceMACAddr;
   uint16_t Type;
-} ETHER_HEADER __attribute__((aligned(2)));
+} ETHER_HEADER __packed;
 
 /*----------------------------------------------------------------------------------------*/
 /* Global variables                                                                       */
@@ -2641,7 +2641,7 @@ uint16_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
   usart_puthex8(USART1, header.SourceMACAddr.v[5]);
   usart_putstr(USART1, "\n");
   usart_putstr(USART1, "Type: ");
-  usart_puthex8(USART1, header.Type);
+  usart_puthex16(USART1, header.Type);
   usart_putstr(USART1, "\n");
 #endif
 
@@ -2855,11 +2855,6 @@ void wf_macFlush(void) {
 
   /* can't send a tx packet of 0 bytes! */
   WF_ASSERT(g_txPacketLength != 0);
-#ifdef WF_DEBUG
-  usart_putstr(USART1, "g_txPacketLength: ");
-  usart_putudec(USART1, g_txPacketLength);
-  usart_putc(USART1, '\n');
-#endif
   
   /* Ensure the MRF24W is awake (only applies if PS-Poll was enabled) */
   wf_ensureWFisAwake();

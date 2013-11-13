@@ -94,21 +94,21 @@ extern "C" {
 #define MAC_ARP     	(0x06u)
 #define MAC_UNKNOWN 	(0xFFu)
 
+#define RESERVED_HTTP_MEMORY 0ul
+#define RESERVED_SSL_MEMORY  0ul
+#define MAX_PACKET_SIZE      (1514ul)
+
   // Memory addresses
-#define RESERVED_CRYPTO_MEMORY          (128ul)
-#define RAMSIZE                         (24 * 1024ul)
-#define TXSTART                         (0x0000ul)
-#define TCP_ETH_RAM_SIZE 0
-#define RESERVED_HTTP_MEMORY 0
-#define RESERVED_SSL_MEMORY 0
-#define RXSTART                         ((TXSTART + 1518ul + TCP_ETH_RAM_SIZE + RESERVED_HTTP_MEMORY + RESERVED_SSL_MEMORY + RESERVED_CRYPTO_MEMORY + 1ul) & 0xFFFE)
-#define	RXSTOP                          (RAMSIZE - 1ul)
-#define RXSIZE                          (RXSTOP - RXSTART + 1ul)
-#define BASE_TX_ADDR                    (TXSTART)
-#define BASE_SCRATCH_ADDR               (BASE_TX_ADDR + 1518ul)
-#define BASE_HTTPB_ADDR                 (BASE_SCRATCH_ADDR + TCP_ETH_RAM_SIZE)
-#define BASE_SSLB_ADDR                  (BASE_HTTPB_ADDR + RESERVED_HTTP_MEMORY)
-#define BASE_CRYPTOB_ADDR               (BASE_SSLB_ADDR + RESERVED_SSL_MEMORY)
+#define RAMSIZE           (14170ul - 8192ul - RESERVED_HTTP_MEMORY - RESERVED_SSL_MEMORY)
+#define TXSTART           (RAMSIZE - (4ul + MAX_PACKET_SIZE + 4ul))
+#define RXSTART           (0ul)
+#define RXSTOP            ((TXSTART - 2ul) | 0x0001ul)
+#define RXSIZE            (RXSTOP - RXSTART + 1ul)
+#define BASE_TX_ADDR      (TXSTART + 4ul)
+#define BASE_SCRATCH_ADDR (BASE_TX_ADDR + (MAX_PACKET_SIZE + 4ul))
+#define BASE_HTTPB_ADDR   (BASE_SCRATCH_ADDR)
+#define BASE_SSLB_ADDR    (BASE_HTTPB_ADDR + RESERVED_HTTP_MEMORY)
+#define BASE_TCB_ADDR     (BASE_SSLB_ADDR + RESERVED_SSL_MEMORY)
 
   /**
    * Scan Results

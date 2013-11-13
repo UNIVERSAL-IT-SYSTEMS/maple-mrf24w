@@ -41,7 +41,12 @@ void network_send(void) {
 
     wf_macSetWritePtr(BASE_TX_ADDR);
     wf_macPutHeader((MAC_ADDR*) & hdr->dest.addr, (hdr->type >> 8) & 0xff, payloadSize);
-    wf_macPutArray((uint8_t*) &uip_buf[UIP_LLH_LEN], payloadSize);
+    if (uip_len <= UIP_LLH_LEN + UIP_TCPIP_HLEN) {
+      wf_macPutArray((uint8_t*) & uip_buf[UIP_LLH_LEN], uip_len - UIP_LLH_LEN);
+    } else {
+      wf_macPutArray((uint8_t*) & uip_buf[UIP_LLH_LEN], UIP_TCPIP_HLEN);
+      wf_macPutArray((uint8_t*) uip_appdata, uip_len - UIP_TCPIP_HLEN - UIP_LLH_LEN);
+    }
     wf_macFlush();
   }
 }
