@@ -1,13 +1,29 @@
 
-#ifndef G2100_H_
-#define G2100_H_
+#ifndef MRF24W_G2100_H_
+#define MRF24W_G2100_H_
 
 #include <stdint.h>
-#include <gpio.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// TODO: move?? 
+void usart_putc(void* dev, uint8_t ch);
+
+struct uip_eth_addr {
+  uint8_t addr[6];
+};
+
+struct uip_eth_hdr {
+  struct uip_eth_addr dest;
+  struct uip_eth_addr src;
+  uint16_t type;
+};
+
+
+
+
 
 #define WF_DISABLED  (0)
 #define WF_ENABLED   (1)
@@ -494,4 +510,4 @@ extern "C" {
 }
 #endif
 
-#endif /* G2100_H_ */
+#endif /* MRF24W_G2100_H_ */

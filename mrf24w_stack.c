@@ -1,3 +1,4 @@
+#if 0
 
 #include "stack.h"
 #include "network.h"
@@ -140,3 +141,5 @@ void stack_arp_self() {
   uip_len = sizeof (struct arp_hdr);
   return;
 }
+
+#endif /* 0 */

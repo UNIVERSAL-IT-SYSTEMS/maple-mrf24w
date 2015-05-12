@@ -1,19 +1,24 @@
 
-#include "network.h"
-#include "uip/uip.h"
-#include "uip/uip_arp.h"
-#include "g2100.h"
+#include "mrf24w_network.h"
+#include "mrf24w_g2100.h"
 #include <string.h>
-#include "libmaple.h"
-#include <libmaple/usart.h>
 
-extern struct uip_eth_addr uip_ethaddr;
+extern uint8_t uip_ethaddr[6];
 
-extern void usart_puthex4(usart_dev* dev, uint8_t value);
-extern void usart_puthex8(usart_dev* dev, uint8_t value);
-extern void usart_puthex16(usart_dev* dev, uint16_t value);
+extern void usart_putchar(void* dev, uint8_t value);
+extern void usart_puthex4(void* dev, uint8_t value);
+extern void usart_puthex8(void* dev, uint8_t value);
+extern void usart_puthex16(void* dev, uint16_t value);
 
-void network_send(void) {
+//TODO: XXX: modify!
+#define UIP_LLH_LEN     (14)
+#define UIP_TCPIP_HLEN  (40)
+#define UIP_BUFSIZE     (1500)
+
+#define USART1          ((void*)1)
+
+
+void network_send(int uip_len, uint8_t *uip_buf) {
   struct uip_eth_hdr* hdr;
   uint16_t payloadSize;
 
@@ -45,13 +50,13 @@ void network_send(void) {
       wf_macPutArray((uint8_t*) & uip_buf[UIP_LLH_LEN], uip_len - UIP_LLH_LEN);
     } else {
       wf_macPutArray((uint8_t*) & uip_buf[UIP_LLH_LEN], UIP_TCPIP_HLEN);
-      wf_macPutArray((uint8_t*) uip_appdata, uip_len - UIP_TCPIP_HLEN - UIP_LLH_LEN);
+      //XXX: wf_macPutArray((uint8_t*) uip_appdata, uip_len - UIP_TCPIP_HLEN - UIP_LLH_LEN);
     }
     wf_macFlush();
   }
 }
 
-unsigned int network_read(void) {
+unsigned int network_read(uint8_t *uip_buf) {
   MAC_ADDR remote;
   uint8_t cFrameType;
   uint16_t i;

@@ -1,14 +1,11 @@
 #include <string.h>
-#include "uip/uip.h"
-#include "g2100.h"
-#include "spi.h"
+#include <stdio.h>
+#include "mrf24w_g2100.h"
 
-#include "libmaple.h"
-#include "nvic.h"
-#include "delay.h"
-
-#include <libmaple/usart.h>
-#include <libmaple/systick.h>
+#include "stm32f4xx_hal.h"
+#include "stm32f4xx_hal_gpio.h"
+#include "stm32f4xx_hal_dma.h"
+#include "stm32f4xx_hal_spi.h"
 
 #define WF_DEBUG
 #define WF_OUTPUT_RAW_TX_RX
@@ -18,7 +15,13 @@ typedef enum _BOOL {
   TRUE
 } BOOL;
 
-void usart_puthex4(usart_dev* dev, uint8_t value) {
+void usart_putc(void* dev, uint8_t ch)
+{
+  (void)dev;
+  printf("%c", (char)ch);
+}
+
+void usart_puthex4(void* dev, uint8_t value) {
   char ch;
   value = value & 0xf;
   if (value >= 10) {
@@ -29,14 +32,14 @@ void usart_puthex4(usart_dev* dev, uint8_t value) {
   usart_putc(dev, ch);
 }
 
-void usart_puthex8(usart_dev* dev, uint8_t value) {
+void usart_puthex8(void* dev, uint8_t value) {
   usart_putc(dev, '0');
   usart_putc(dev, 'x');
   usart_puthex4(dev, value >> 4);
   usart_puthex4(dev, value >> 0);
 }
 
-void usart_puthex16(usart_dev* dev, uint16_t value) {
+void usart_puthex16(void* dev, uint16_t value) {
   usart_putc(dev, ' ');
   usart_putc(dev, '0');
   usart_putc(dev, 'x');
@@ -583,9 +586,9 @@ typedef struct {
 /*----------------------------------------------------------------------------------------*/
 /* Global variables                                                                       */
 /*----------------------------------------------------------------------------------------*/
-extern spi_dev*  wf_spi;
-extern gpio_dev* wf_cs_port;
-extern uint8_t   wf_cs_bit;
+extern SPI_HandleTypeDef    * wf_spi;
+extern GPIO_InitTypeDef     * wf_cs_port;
+extern uint8_t                wf_cs_bit;
 
 uint8_t wf_connected = FALSE;
 
