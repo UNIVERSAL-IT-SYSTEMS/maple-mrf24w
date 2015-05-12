@@ -8,9 +8,11 @@
 #include "stm32f4xx_hal_spi.h"
 #include "mrf24w_g2100.h"
 
+#define ASSERT(cond) do{ if (!(cond)) { printf("assert in %s:%d\n", __FILE__, __LINE__, 0); while (1) {}; } } while (0)
+
 void (*Mrf24wProcessEvent)(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo);
 
-void Mrf24w_init(SPI_TypeDef *spi, uint16_t resetPin, uint16_t intPin);
+void mrf24w_init(SPI_TypeDef *spi, GPIO_TypeDef *cs_gpio, uint16_t cs_pin, GPIO_TypeDef *reset_gpio, uint16_t reset_pin, GPIO_TypeDef * int_gpio, uint16_t int_pin);
 void mrf24w_begin();
 void mrf24w_end();
 void mrf24w_loop();

@@ -4,12 +4,15 @@
 
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "stm32f4xx_hal.h"
+#include "stm32f4xx_hal_dma.h"
+#include "stm32f4xx_hal_spi.h"
+#include "stm32f4xx_hal_gpio.h"
 
 // TODO: move?? 
 void usart_putc(void* dev, uint8_t ch);
+#define ASSERT(cond) do{ if (!(cond)) { printf("assert in %s:%d\n", __FILE__, __LINE__, 0); while (1) {}; } } while (0)
+extern SPI_HandleTypeDef hspi;
 
 struct uip_eth_addr {
   uint8_t addr[6];
@@ -505,9 +508,5 @@ struct uip_eth_hdr {
    *             first Connection Profile in the list.
    */
   void wf_cmConnect(uint8_t CpId);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif /* MRF24W_G2100_H_ */
