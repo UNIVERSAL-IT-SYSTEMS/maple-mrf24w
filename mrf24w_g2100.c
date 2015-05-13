@@ -2362,25 +2362,25 @@ uint8_t wf_read8BitWFRegister(uint8_t regId) {
 void spi_transfer(volatile uint8_t* buf, uint16_t len, uint8_t toggle_cs) {
     uint8_t i;
 
-//    uint8_t * rx_buf = PICO_ZALLOC(len);
-//    if (!rx_buf)
-//        return;
+    uint8_t * rx_buf = PICO_ZALLOC(len);
+    if (!rx_buf)
+        return;
 
     // CS is active low
     HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_RESET);
 
-    for (i = 0; i < len; i++) {
-        HAL_SPI_Transmit(&hspi, &buf[i], 1, HAL_MAX_DELAY);
-        HAL_SPI_Receive(&hspi, &buf[i], 1, HAL_MAX_DELAY);
-        // while (!spi_is_tx_empty(wf_spi));
-        // spi_tx(wf_spi, (const void *) &buf[i], 1);
-        // while (!spi_is_rx_nonempty(wf_spi));
-        // buf[i] = spi_rx_reg(wf_spi);
-    }
+    //for (i = 0; i < len; i++) {
+    //    HAL_SPI_Transmit(&hspi, &buf[i], 1, HAL_MAX_DELAY);
+    //    HAL_SPI_Receive(&hspi, &buf[i], 1, HAL_MAX_DELAY);
+    //    // while (!spi_is_tx_empty(wf_spi));
+    //    // spi_tx(wf_spi, (const void *) &buf[i], 1);
+    //    // while (!spi_is_rx_nonempty(wf_spi));
+    //    // buf[i] = spi_rx_reg(wf_spi);
+    //}
 
-//    HAL_SPI_TransmitReceive(&hspi, buf, rx_buf, len, HAL_MAX_DELAY);
-//    memcpy(buf, rx_buf, len);
-//    PICO_FREE(rx_buf);
+    HAL_SPI_TransmitReceive(&hspi, buf, rx_buf, len, HAL_MAX_DELAY);
+    memcpy(buf, rx_buf, len);
+    PICO_FREE(rx_buf);
 
     if (toggle_cs) {
         HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_SET);

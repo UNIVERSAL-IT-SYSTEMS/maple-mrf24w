@@ -39,11 +39,11 @@ SPI_HandleTypeDef hspi;
 
 
 /**
-* @brief This function handles SPI1 global interrupt.
+* @brief This function handles SPI2 global interrupt.
 */
-void SPI1_IRQHandler(void)
+void SPI2_IRQHandler(void)
 {
-  HAL_NVIC_ClearPendingIRQ(SPI1_IRQn);
+  HAL_NVIC_ClearPendingIRQ(SPI2_IRQn);
   HAL_SPI_IRQHandler(&hspi);
 }
 
@@ -53,7 +53,7 @@ void SPI1_IRQHandler(void)
 void EXTI0_IRQHandler(void)
 {
   HAL_NVIC_ClearPendingIRQ(EXTI0_IRQn);
-  //XXX HAL_SPI_Transmit_IT( &hspi1 , (uint8_t*)aTxBuffer , 10 );
+  //XXX HAL_SPI_Transmit_IT( &hspi , (uint8_t*)aTxBuffer , 10 );
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
 } 
 
@@ -69,7 +69,7 @@ struct pico_device * pico_eth_create(char *name, uint8_t *mac)
         return NULL;
 
     /*          SPI             CS,               RESET            INTERRUPT   */
-    mrf24w_init(SPI1, GPIOA, GPIO_PIN_3, GPIOA, GPIO_PIN_2, GPIOA, GPIO_PIN_0);
+    mrf24w_init(SPI2, GPIOB, GPIO_PIN_12, GPIOB, GPIO_PIN_2, GPIOB, GPIO_PIN_11);
     mrf24w_begin();
 
     return mrf24wg;
@@ -81,17 +81,17 @@ void mrf24w_init(SPI_TypeDef *spi, GPIO_TypeDef *cs_gpio, uint16_t cs_pin, GPIO_
     m_wirelessMode = WF_INFRASTRUCTURE;
 
     wf_spi = spi;
-    wf_cs_port = cs_gpio;           // CS:  YELLOW wire, pulled LOW,  PA3
+    wf_cs_port = cs_gpio;           // CS:  YELLOW wire, floating  ,  PB12
     wf_cs_pin = cs_pin;
-    wf_reset_port = reset_gpio;     // RES: BLUE wire,   pulled LOW,  PA2
-    wf_reset_pin = reset_pin;
-    wf_int_port = int_gpio;         // INT: ORANGE wire, pulled HIGH, PA0
+    //wf_reset_port = reset_gpio;   // RES: BLUE wire,   direct connection,  XXX
+    //wf_reset_pin = reset_pin;
+    wf_int_port = int_gpio;         // INT: ORANGE wire, pulled HIGH, PB11
     wf_int_pin = int_pin;
 }
 
 
 void mrf24w_begin() {
-    GPIO_InitTypeDef GPIO_InitStruct;
+    GPIO_InitTypeDef GPIO_InitStruct = {};
 
     /*
      * Enable all GPIO port clocks
@@ -104,20 +104,21 @@ void mrf24w_begin() {
     __GPIOH_CLK_ENABLE();
 
     // Interrupt pin -- PA0 ==> EXTI0
-    GPIO_InitStruct.Pin = wf_int_pin;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(wf_int_port, &GPIO_InitStruct);
-    HAL_NVIC_SetPriority(EXTI0_IRQn, 1, 0);
-    HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+    // XXX TODO
+    //GPIO_InitStruct.Pin = wf_int_pin;
+    //GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+    //GPIO_InitStruct.Pull = GPIO_NOPULL;
+    //HAL_GPIO_Init(wf_int_port, &GPIO_InitStruct);
+    //HAL_NVIC_SetPriority(EXTI0_IRQn, 1, 0);
+    //HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
     // Reset pin
-    GPIO_InitStruct.Pin = wf_reset_pin;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL; // Pulled low by break-out-board
-    HAL_GPIO_Init(wf_reset_port, &GPIO_InitStruct);
-    HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_RESET); /* reset is active low */
-    HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_SET);
+    //GPIO_InitStruct.Pin = wf_reset_pin;
+    //GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    //GPIO_InitStruct.Pull = GPIO_NOPULL; // Pulled low by break-out-board
+    //HAL_GPIO_Init(wf_reset_port, &GPIO_InitStruct);
+    //HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_RESET); /* reset is active low */
+    //HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_SET);
 
     // CS pin
     GPIO_InitStruct.Pin = wf_cs_pin;
@@ -127,26 +128,31 @@ void mrf24w_begin() {
     HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_SET);
 
     // SPI pin config
-    __SPI1_CLK_ENABLE();
-    GPIO_InitStruct.Pin = (GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7);
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
-    GPIO_InitStruct.Speed = GPIO_SPEED_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    __SPI2_CLK_ENABLE();
+    GPIO_InitStruct.Pin = (GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15);    // PB13: SCL
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;                             // PB14: MISO
+    GPIO_InitStruct.Speed = GPIO_SPEED_HIGH;                            // PB15: MOSI
+    GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
     // SPI init
     hspi.Instance = wf_spi;
     hspi.Init.Mode = SPI_MODE_MASTER;
     hspi.Init.Direction = SPI_DIRECTION_2LINES;
     hspi.Init.DataSize = SPI_DATASIZE_8BIT;
+
     hspi.Init.CLKPolarity = SPI_POLARITY_LOW;
     hspi.Init.CLKPhase = SPI_PHASE_1EDGE;
-    hspi.Init.NSS = SPI_NSS_SOFT;
-    hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+
+    //hspi.Init.CLKPolarity = SPI_POLARITY_HIGH;
+    //hspi.Init.CLKPhase = SPI_PHASE_2EDGE;
+
+    hspi.Init.NSS = SPI_NSS_HARD_OUTPUT; //SPI_NSS_SOFT;
+    hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
     hspi.Init.FirstBit = SPI_FIRSTBIT_MSB;
     hspi.Init.TIMode = SPI_TIMODE_DISABLED;
     hspi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLED;
-    hspi.Init.CRCPolynomial = 7;
+    hspi.Init.CRCPolynomial = 0;
     HAL_SPI_Init(&hspi);
 
     printf("wf_init\n");
