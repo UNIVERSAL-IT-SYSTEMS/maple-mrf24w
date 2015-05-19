@@ -48,9 +48,9 @@ void SPI2_IRQHandler(void)
 }
 
 /**
-* @brief This function handles EXTI Line 0 and Line 1 interrupts.
+* @brief This function handles EXTI Line 10->15 interrupts.
 */
-void EXTI0_IRQHandler(void)
+void EXTI15_10_IRQHandler(void)
 {
   HAL_NVIC_ClearPendingIRQ(EXTI0_IRQn);
   //XXX HAL_SPI_Transmit_IT( &hspi , (uint8_t*)aTxBuffer , 10 );
@@ -69,29 +69,29 @@ struct pico_device * pico_eth_create(char *name, uint8_t *mac)
         return NULL;
 
     /*          SPI             CS,               RESET            INTERRUPT   */
-    mrf24w_init(SPI2, GPIOB, GPIO_PIN_12, GPIOB, GPIO_PIN_2, GPIOB, GPIO_PIN_11);
-    mrf24w_begin();
+    printf("mrf24w_init\n");
+    mrf24w_init(SPI2, GPIOB, GPIO_PIN_12, GPIOB, GPIO_PIN_10, GPIOB, GPIO_PIN_11);
+
+    printf("wf_init\n");
+    wf_init();
 
     return mrf24wg;
 }
 
 void mrf24w_init(SPI_TypeDef *spi, GPIO_TypeDef *cs_gpio, uint16_t cs_pin, GPIO_TypeDef *reset_gpio, uint16_t reset_pin, GPIO_TypeDef *int_gpio, uint16_t int_pin)
 {
+    GPIO_InitTypeDef GPIO_InitStruct = {};
+
     m_securityType = WF_SECURITY_OPEN;
     m_wirelessMode = WF_INFRASTRUCTURE;
 
     wf_spi = spi;
     wf_cs_port = cs_gpio;           // CS:  YELLOW wire, floating  ,  PB12
     wf_cs_pin = cs_pin;
-    //wf_reset_port = reset_gpio;   // RES: BLUE wire,   direct connection,  XXX
-    //wf_reset_pin = reset_pin;
+    wf_reset_port = reset_gpio;     // RES: BLUE wire,   floating  ,  PB10
+    wf_reset_pin = reset_pin;
     wf_int_port = int_gpio;         // INT: ORANGE wire, pulled HIGH, PB11
     wf_int_pin = int_pin;
-}
-
-
-void mrf24w_begin() {
-    GPIO_InitTypeDef GPIO_InitStruct = {};
 
     /*
      * Enable all GPIO port clocks
@@ -103,22 +103,21 @@ void mrf24w_begin() {
     __GPIOE_CLK_ENABLE();
     __GPIOH_CLK_ENABLE();
 
-    // Interrupt pin -- PA0 ==> EXTI0
-    // XXX TODO
-    //GPIO_InitStruct.Pin = wf_int_pin;
-    //GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-    //GPIO_InitStruct.Pull = GPIO_NOPULL;
-    //HAL_GPIO_Init(wf_int_port, &GPIO_InitStruct);
-    //HAL_NVIC_SetPriority(EXTI0_IRQn, 1, 0);
-    //HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+    // Interrupt pin -- PB11 ==> EXTI11
+    GPIO_InitStruct.Pin = wf_int_pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING; // Still pulled up by a resistor for now.. (orange wire)
+    //GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(wf_int_port, &GPIO_InitStruct);
+    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
     // Reset pin
-    //GPIO_InitStruct.Pin = wf_reset_pin;
-    //GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    //GPIO_InitStruct.Pull = GPIO_NOPULL; // Pulled low by break-out-board
-    //HAL_GPIO_Init(wf_reset_port, &GPIO_InitStruct);
-    //HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_RESET); /* reset is active low */
-    //HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_SET);
+    GPIO_InitStruct.Pin = wf_reset_pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(wf_reset_port, &GPIO_InitStruct);
+    HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_RESET); /* reset is active low */
 
     // CS pin
     GPIO_InitStruct.Pin = wf_cs_pin;
@@ -130,12 +129,14 @@ void mrf24w_begin() {
     // SPI pin config
     __SPI2_CLK_ENABLE();
     GPIO_InitStruct.Pin = (GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15);    // PB13: SCL
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;                             // PB14: MISO
-    GPIO_InitStruct.Speed = GPIO_SPEED_HIGH;                            // PB15: MOSI
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;                             // PB14: MISO
+    GPIO_InitStruct.Speed = GPIO_SPEED_FAST;                            // PB15: MOSI
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
     GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
     // SPI init
+    // Maximum SPI clock for MRF24WG is 25 MHz
     hspi.Instance = wf_spi;
     hspi.Init.Mode = SPI_MODE_MASTER;
     hspi.Init.Direction = SPI_DIRECTION_2LINES;
@@ -148,21 +149,12 @@ void mrf24w_begin() {
     //hspi.Init.CLKPhase = SPI_PHASE_2EDGE;
 
     hspi.Init.NSS = SPI_NSS_HARD_OUTPUT; //SPI_NSS_SOFT;
-    hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+    hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64;
     hspi.Init.FirstBit = SPI_FIRSTBIT_MSB;
     hspi.Init.TIMode = SPI_TIMODE_DISABLED;
     hspi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLED;
     hspi.Init.CRCPolynomial = 0;
     HAL_SPI_Init(&hspi);
-
-    printf("wf_init\n");
-    //  wf_hook_on_connected = Mrf24w_wf_hook_on_connected;
-    //  wf_hook_on_connected_user_data = this;
-    wf_init();
-
-    //stack_init();
-
-    printf("begin end\n");
 }
 
 void mrf24w_end() {

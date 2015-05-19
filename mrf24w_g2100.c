@@ -611,7 +611,9 @@ typedef struct {
 /*----------------------------------------------------------------------------------------*/
 extern SPI_TypeDef    * wf_spi;
 extern GPIO_TypeDef   * wf_cs_port;
-extern uint8_t          wf_cs_pin;
+extern uint32_t         wf_cs_pin;
+extern GPIO_TypeDef   * wf_reset_port;
+extern uint32_t         wf_reset_pin;
 
 uint8_t wf_connected = FALSE;
 
@@ -1089,7 +1091,7 @@ void wf_rawWrite(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t *p
 
 /***************************************************************************************************/
 
-
+#define WF_DEBUG
 void wf_init() {
     tWFDeviceInfo deviceInfo;
 
@@ -2185,7 +2187,12 @@ void wf_cmCheckConnectionState(uint8_t* p_state, uint8_t* p_currentCpId) {
 void wf_chipReset() {
     uint16_t value;
 
-    delay_ms(1);
+    //HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_RESET);
+
+    HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_RESET);
+    delay_ms(5);
+    HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_SET);
+    delay_ms(5);
 
     // clear the power bit to disable low power mode on the MRF24W
     wf_write16BitWFRegister(WF_PSPOLL_H_REG, 0x0000);
@@ -2198,13 +2205,13 @@ void wf_chipReset() {
 
     // after reset is started poll register to determine when HW reset has completed
     do {
-        delay_ms(5000);
+        delay_ms(500);
         wf_write16BitWFRegister(WF_INDEX_ADDR_REG, WF_HW_STATUS_REG);
         value = wf_read16BitWFRegister(WF_INDEX_DATA_REG);
     } while ((value & WF_HW_STATUS_NOT_IN_RESET_MASK) == 0);
 
     do {
-        delay_ms(5000);
+        delay_ms(500);
         value = wf_read16BitWFRegister(WF_HOST_WFIFO_BCNT0_REG);
     } while (value == 0);
 }
@@ -2343,7 +2350,8 @@ uint16_t wf_read16BitWFRegister(uint8_t regId) {
     g_buf[1] = 0x00;
     g_buf[2] = 0x00;
     spi_transfer(g_buf, 3, 1);
-    return (((uint16_t) g_buf[1]) << 8) | ((uint16_t) (g_buf[2]));
+    //return (((uint16_t) g_buf[1]) << 8) | ((uint16_t) (g_buf[2]));
+    return (((uint16_t) g_buf[2]) << 8) | ((uint16_t) (g_buf[1]));
 }
 
 void wf_write8BitWFRegister(uint8_t regId, uint8_t value) {
@@ -2359,28 +2367,18 @@ uint8_t wf_read8BitWFRegister(uint8_t regId) {
     return g_buf[1];
 }
 
+static uint8_t rx_buf[8];
 void spi_transfer(volatile uint8_t* buf, uint16_t len, uint8_t toggle_cs) {
     uint8_t i;
 
-    uint8_t * rx_buf = PICO_ZALLOC(len);
-    if (!rx_buf)
-        return;
+    if (len > 8)
+        while(1) { /* Error! */ };
 
     // CS is active low
     HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_RESET);
 
-    //for (i = 0; i < len; i++) {
-    //    HAL_SPI_Transmit(&hspi, &buf[i], 1, HAL_MAX_DELAY);
-    //    HAL_SPI_Receive(&hspi, &buf[i], 1, HAL_MAX_DELAY);
-    //    // while (!spi_is_tx_empty(wf_spi));
-    //    // spi_tx(wf_spi, (const void *) &buf[i], 1);
-    //    // while (!spi_is_rx_nonempty(wf_spi));
-    //    // buf[i] = spi_rx_reg(wf_spi);
-    //}
-
     HAL_SPI_TransmitReceive(&hspi, buf, rx_buf, len, HAL_MAX_DELAY);
-    memcpy(buf, rx_buf, len);
-    PICO_FREE(rx_buf);
+    memcpy(buf, &rx_buf, len);
 
     if (toggle_cs) {
         HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_SET);
