@@ -52,9 +52,10 @@ void SPI2_IRQHandler(void)
 */
 void EXTI15_10_IRQHandler(void)
 {
-  HAL_NVIC_ClearPendingIRQ(EXTI0_IRQn);
+  HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
   //XXX HAL_SPI_Transmit_IT( &hspi , (uint8_t*)aTxBuffer , 10 );
-  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
+  wf_isr();
+  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_11);
 } 
 
 void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) {
@@ -122,7 +123,7 @@ void mrf24w_init(SPI_TypeDef *spi, GPIO_TypeDef *cs_gpio, uint16_t cs_pin, GPIO_
     // CS pin
     GPIO_InitStruct.Pin = wf_cs_pin;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL; // Pulled low by break-out-board
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN; // Pulled low by break-out-board
     HAL_GPIO_Init(wf_cs_port, &GPIO_InitStruct);
     HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_SET);
 
@@ -145,11 +146,8 @@ void mrf24w_init(SPI_TypeDef *spi, GPIO_TypeDef *cs_gpio, uint16_t cs_pin, GPIO_
     hspi.Init.CLKPolarity = SPI_POLARITY_LOW;
     hspi.Init.CLKPhase = SPI_PHASE_1EDGE;
 
-    //hspi.Init.CLKPolarity = SPI_POLARITY_HIGH;
-    //hspi.Init.CLKPhase = SPI_PHASE_2EDGE;
-
-    hspi.Init.NSS = SPI_NSS_HARD_OUTPUT; //SPI_NSS_SOFT;
-    hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64;
+    hspi.Init.NSS = SPI_NSS_SOFT;
+    hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
     hspi.Init.FirstBit = SPI_FIRSTBIT_MSB;
     hspi.Init.TIMode = SPI_TIMODE_DISABLED;
     hspi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLED;
@@ -284,3 +282,4 @@ void mrf24w_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) 
 
     wf_setFuncState(WF_PROCESS_EVENT_FUNC, WF_LEAVING_FUNCTION);
 }
+

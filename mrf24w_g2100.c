@@ -305,6 +305,41 @@ void usart_puthex16(void* dev, uint16_t value) {
 #define ENC_RD_PTR_ID                   (0)
 #define ENC_WT_PTR_ID                   (1)
 
+/*-----------------------------------------------------------------------*/
+/* Defines needed for the PLL reset workaround                           */
+/*-----------------------------------------------------------------------*/
+
+// This block of defines needed to restart PLL
+#define ANALOG_PORT_3_REG_TYPE           ((uint32_t)0x09)   /* 16-bit analog register in SPI Port 3                                          */
+#define ANALOG_PORT_2_REG_TYPE           ((uint32_t)0x08)   /* 16-bit analog register in SPI Port 2                                          */
+#define ANALOG_PORT_1_REG_TYPE           ((uint32_t)0x0a)   /* 16-bit analog register in SPI Port 1                                          */
+#define ANALOG_PORT_0_REG_TYPE           ((uint32_t)0x0b)   /* 16-bit analog register in SPI Port 0                                          */
+
+#define SPI_WRITE_MASK                   (uint8_t)0x00     // bit 0 = 0
+#define SPI_READ_MASK                    (uint8_t)0x01     // bit 0 = 1
+#define SPI_AUTO_INCREMENT_ENABLED_MASK  (uint8_t)0x00     // bit 1 = 0
+#define SPI_AUTO_INCREMENT_DISABLED_MASK (uint8_t)0x02     // bit 1 = 1
+
+#define PLL0_REG                         ((uint32_t)(0 * 2)) 
+#define OSC0_REG                         ((uint32_t)(0 * 2)) 
+#define BIAS_REG                         ((uint32_t)(4 * 2))
+
+// HOST_RESET_REG masks
+#define HR_CPU_RST_N_MASK                     ((uint16_t)0x01 << 15)
+#define HR_DISABLE_DOWNLOAD_SCRAMBLER_MASK    ((uint16_t)0x01 << 14)
+#define HR_FORCE_CPU_CLK_FREEZE_MASK          ((uint16_t)0x01 << 13)
+#define HR_HOST_ANA_SPI_EN_MASK               ((uint16_t)0x01 << 12)
+#define HR_HOST_ANA_SPI_DIN_MASK              ((uint16_t)0x01 << 11)
+#define HR_HOST_ANA_SPI_DOUT_MASK             ((uint16_t)0x01 << 10)
+#define HR_HOST_ANA_SPI_CLK_MASK              ((uint16_t)0x01 << 9)
+#define HR_HOST_ANA_SPI_CSN_MASK              ((uint16_t)0x07 << 6)   // 8:6
+#define HR_RESERVED_2_MASK                    ((uint16_t)0x01 << 5)
+#define HR_HOST_SPI_DISABLE_MASK              ((uint16_t)0x01 << 4)
+#define HR_HOST_ENABLE_NEW_PROG_MASK          ((uint16_t)0x01 << 3)
+#define HR_HOST_ENABLE_DOWNLOAD_MASK          ((uint16_t)0x01 << 2)
+#define HR_HOST_FAST_RESET_MASK               ((uint16_t)0x01 << 1)
+#define HR_HOST_RESET_MASK                    ((uint16_t)0x01 << 0)
+
 //============================================================================
 //                                  Rx/Tx Buffer Constants
 // Used to correlate former Ethernet packets to MRF24W packets.
@@ -650,6 +685,8 @@ static uint8_t   g_funcFlags = 0x00;
 /*----------------------------------------------------------------------------------------*/
 /* Function declarations                                                                  */
 /*----------------------------------------------------------------------------------------*/
+
+void wf_resetPll(void);
 
 /**
  * Performs the necessary SPI operations to cause the MRF24W to reset.
@@ -2187,18 +2224,25 @@ void wf_cmCheckConnectionState(uint8_t* p_state, uint8_t* p_currentCpId) {
 void wf_chipReset() {
     uint16_t value;
 
-    //HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_RESET);
-
     HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_RESET);
     delay_ms(5);
+
+    // Needed to enable regulator (so that chip sees the reset??)
+    HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_RESET);
+
     HAL_GPIO_WritePin(wf_reset_port, wf_reset_pin, GPIO_PIN_SET);
     delay_ms(5);
+
+    // Need A1-silicon workaround, otherwise HW_STATUS will report 0x30 -> SPI Disabled!
+    wf_resetPll();
 
     // clear the power bit to disable low power mode on the MRF24W
     wf_write16BitWFRegister(WF_PSPOLL_H_REG, 0x0000);
 
     // Set HOST_RESET bit in register to put device in reset
     wf_write16BitWFRegister(WF_HOST_RESET_REG, wf_read16BitWFRegister(WF_HOST_RESET_REG) | WF_HOST_RESET_MASK);
+
+    delay_ms(5);
 
     // Clear HOST_RESET bit in register to take device out of reset
     wf_write16BitWFRegister(WF_HOST_RESET_REG, wf_read16BitWFRegister(WF_HOST_RESET_REG) & ~WF_HOST_RESET_MASK);
@@ -2350,8 +2394,7 @@ uint16_t wf_read16BitWFRegister(uint8_t regId) {
     g_buf[1] = 0x00;
     g_buf[2] = 0x00;
     spi_transfer(g_buf, 3, 1);
-    //return (((uint16_t) g_buf[1]) << 8) | ((uint16_t) (g_buf[2]));
-    return (((uint16_t) g_buf[2]) << 8) | ((uint16_t) (g_buf[1]));
+    return (((uint16_t) g_buf[1]) << 8) | ((uint16_t) (g_buf[2]));
 }
 
 void wf_write8BitWFRegister(uint8_t regId, uint8_t value) {
@@ -2367,17 +2410,20 @@ uint8_t wf_read8BitWFRegister(uint8_t regId) {
     return g_buf[1];
 }
 
-static uint8_t rx_buf[8];
+static uint8_t rx_buf[20];
 void spi_transfer(volatile uint8_t* buf, uint16_t len, uint8_t toggle_cs) {
     uint8_t i;
 
-    if (len > 8)
+    if (len > 16)
         while(1) { /* Error! */ };
 
     // CS is active low
     HAL_GPIO_WritePin(wf_cs_port, wf_cs_pin, GPIO_PIN_RESET);
 
-    HAL_SPI_TransmitReceive(&hspi, buf, rx_buf, len, HAL_MAX_DELAY);
+    for (i=0; i<len; i++)
+    {
+        HAL_SPI_TransmitReceive(&hspi, buf+i, rx_buf+i, 1, HAL_MAX_DELAY);
+    }
     memcpy(buf, &rx_buf, len);
 
     if (toggle_cs) {
@@ -3132,4 +3178,101 @@ uint16_t wf_macGetArray(uint8_t *val, uint16_t len) {
 
 void wf_macDiscardRx(void) {
     g_wasDiscarded = TRUE;
+}
+
+
+
+
+//==============================================================================
+//                      PLL WORKAROUND
+//==============================================================================
+
+// When bit-banging, determines which SPI port to use based on the type of register we are accessing
+static uint8_t wf_getSpiPort(uint8_t regType)
+{
+    if (regType == ANALOG_PORT_3_REG_TYPE)
+        return 2;
+    else if (regType == ANALOG_PORT_2_REG_TYPE)
+        return 3;
+    else if (regType == ANALOG_PORT_1_REG_TYPE)
+        return 1;
+    else if (regType == ANALOG_PORT_0_REG_TYPE)
+        return 0;
+    else
+        return 0xff; // should never happen
+}
+
+static void wf_writeAnalogRegisterBitBang(uint8_t regType, uint16_t address, uint16_t value)
+{
+    uint8_t  spiPort;
+    uint16_t hrVal;
+    uint8_t  bitMask8;
+    uint16_t bitMask16;
+    uint8_t  i;
+    uint8_t  regAddress;
+
+    spiPort = wf_getSpiPort(regType);   // extract SPI port (0-3) from the register type
+
+    // Enable the on-chip SPI and select the desired bank (0-3)
+    hrVal = (HR_HOST_ANA_SPI_EN_MASK | (spiPort << 6));
+    wf_write16BitWFRegister(WF_HOST_RESET_REG, hrVal);
+
+    // create register address byte
+    regAddress = (address << 2) | SPI_AUTO_INCREMENT_ENABLED_MASK | SPI_WRITE_MASK;
+
+    // bit-bang the regAddress byte, MS bit to LS bit
+    bitMask8 = 0x80;        // start with MS bit of byte being bit-banged out
+    for (i = 0; i < 8; ++i)
+    {
+        hrVal &= ~(HR_HOST_ANA_SPI_DOUT_MASK | HR_HOST_ANA_SPI_CLK_MASK); // zero out DOUT and CLK
+
+        // mask out ADDRESS bit being clocked and write to HOST_ANA_SPI_DOUT (bit 10) in HOST_RESET_REG with the HOST_ANA_SPI_CLK low
+        if ((regAddress & bitMask8) > 0)
+        {
+            hrVal |= HR_HOST_ANA_SPI_DOUT_MASK;
+        }
+        wf_write16BitWFRegister(WF_HOST_RESET_REG, hrVal);
+
+        // now toggle SPI clock high, on rising edge this bit is clocked out
+        hrVal |= HR_HOST_ANA_SPI_CLK_MASK;
+        wf_write16BitWFRegister(WF_HOST_RESET_REG, hrVal);
+
+        bitMask8 >>= 1; //  # get to next bit in address byte
+    }
+
+    // bit bang data from MS bit to LS bit
+    bitMask16 = 0x8000;        // start with MS bit of byte being bit-banged out
+    for (i = 0; i < 16; ++i)
+    {
+        hrVal &= ~(HR_HOST_ANA_SPI_DOUT_MASK | HR_HOST_ANA_SPI_CLK_MASK); // zero out DOUT and CLK
+
+        // mask in data bit being clock out and write to HOST_ANA_SPI_DOUT (bit 10) in HOST_RESET_REG with the HOST_ANA_SPI_CLK low
+        if ((value & bitMask16) > 0)
+        {
+            hrVal |= HR_HOST_ANA_SPI_DOUT_MASK;
+        }
+
+        wf_write16BitWFRegister(WF_HOST_RESET_REG, hrVal);
+
+        // now toggle SPI clock high, on rising edge this bit is clocked out
+        hrVal |= HR_HOST_ANA_SPI_CLK_MASK;
+        wf_write16BitWFRegister(WF_HOST_RESET_REG, hrVal);
+
+        bitMask16 = bitMask16 >> 1;  // go to next bit in data byte
+    }
+
+    // Disable the on-chip SPI
+    hrVal &= ~HR_HOST_ANA_SPI_EN_MASK;
+    wf_write16BitWFRegister(WF_HOST_RESET_REG, hrVal);
+}
+
+void wf_resetPll(void)
+{
+    // shuttle MRF24WG workaround (benign to production MRF24WG)
+    wf_writeAnalogRegisterBitBang(ANALOG_PORT_3_REG_TYPE, PLL0_REG, 0x8021);
+    wf_writeAnalogRegisterBitBang(ANALOG_PORT_3_REG_TYPE, PLL0_REG, 0x6021);
+
+    // production MRF24WG workaround (benign to shuttle MRF24WG)
+    wf_writeAnalogRegisterBitBang(ANALOG_PORT_1_REG_TYPE, OSC0_REG, 0x6b80);
+    wf_writeAnalogRegisterBitBang(ANALOG_PORT_1_REG_TYPE, BIAS_REG, 0xc000);
 }
