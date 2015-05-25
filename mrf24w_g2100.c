@@ -11,8 +11,15 @@
 #include "pico_config.h"
 #include "pico_stack.h"
 
+/* DEVICE CONFIG */
+#define MRF24WG
+
+/* DEBUG CONFIG */
 #define WF_DEBUG
-#define WF_OUTPUT_RAW_TX_RX
+//#define WF_DEBUG_INT
+//#define WF_DEBUG_RAW_TX_RX
+#define dbg     printf
+
 
 void delay_ms(uint32_t delay)
 {
@@ -25,53 +32,6 @@ typedef enum _BOOL {
     FALSE = 0,
     TRUE
 } BOOL;
-
-void usart_putstr(void* dev, char* str)
-{
-    (void)dev;
-    printf("%s", str);
-}
-
-void usart_putc(void* dev, uint8_t ch)
-{
-    (void)dev;
-    printf("%c", (char)ch);
-}
-
-void usart_putudec(void* dev, uint8_t dec)
-{
-    (void)dev;
-    printf("%d", dec);
-}
-
-void usart_puthex4(void* dev, uint8_t value) {
-    char ch;
-    value = value & 0xf;
-    if (value >= 10) {
-        ch = (value - 10) + 'a';
-    } else {
-        ch = value + '0';
-    }
-    usart_putc(dev, ch);
-}
-
-void usart_puthex8(void* dev, uint8_t value) {
-    usart_putc(dev, '0');
-    usart_putc(dev, 'x');
-    usart_puthex4(dev, value >> 4);
-    usart_puthex4(dev, value >> 0);
-}
-
-void usart_puthex16(void* dev, uint16_t value) {
-    usart_putc(dev, ' ');
-    usart_putc(dev, '0');
-    usart_putc(dev, 'x');
-    usart_puthex4(dev, value >> 12);
-    usart_puthex4(dev, value >> 8);
-    usart_puthex4(dev, value >> 4);
-    usart_puthex4(dev, value >> 0);
-    usart_putc(dev, ' ');
-}
 
 /*--------------------*/
 /* Endianness defines */
@@ -231,11 +191,11 @@ void usart_puthex16(void* dev, uint16_t value) {
 
 /* these definitions are used in calls to enable and
  * disable interrupt bits. */
-#define WF_INT_DISABLE            ((uint8_t)0)
-#define WF_INT_ENABLE             ((uint8_t)1)
+#define WF_INT_DISABLE                  ((uint8_t)0)
+#define WF_INT_ENABLE                   ((uint8_t)1)
 
-#define WF_LOW_POWER_MODE_ON      (1)
-#define WF_LOW_POWER_MODE_OFF     (0)
+#define WF_LOW_POWER_MODE_ON            (1)
+#define WF_LOW_POWER_MODE_OFF           (0)
 
 #define RAW_ID_0                        (0)
 #define RAW_ID_1                        (1)
@@ -246,10 +206,10 @@ void usart_puthex16(void* dev, uint16_t value) {
 #define RAW_INVALID_ID                  (0xff)
 
 /* RAW Window states */
-#define WF_RAW_UNMOUNTED            (0)
-#define WF_SCRATCH_MOUNTED          (1)
-#define WF_RAW_DATA_MOUNTED         (2)
-#define WF_RAW_MGMT_MOUNTED         (3)
+#define WF_RAW_UNMOUNTED                (0)
+#define WF_SCRATCH_MOUNTED              (1)
+#define WF_RAW_DATA_MOUNTED             (2)
+#define WF_RAW_MGMT_MOUNTED             (3)
 
 // Source/Destination objects on the MRF24W
 #define RAW_MAC                         (0x00)   /* Cmd processor (aka MRF24W MAC)                 */
@@ -263,6 +223,10 @@ void usart_puthex16(void* dev, uint16_t value) {
 #define RAW_DATA_RX_ID                  RAW_ID_0
 #define RAW_DATA_TX_ID                  RAW_ID_1
 #define RAW_MGMT_RX_ID                  RAW_RX_ID
+
+/* Scratchpad registers */
+#define WF_SCRATCHPAD_0_REG             ((uint16_t)(0x3d))
+#define WF_SCRATCHPAD_1_REG             ((uint16_t)(0x3e))
 
 /*-------------------------------------------*/
 /* Connection Manager Event Message Subtypes */
@@ -680,7 +644,8 @@ static BOOL      g_mgmtAppWaiting = FALSE;
 static volatile BOOL g_exIntNeedsServicing = FALSE; /**< TRUE if external interrupt needs processing, else FALSE */
 static BOOL      g_wiFiConnectionChanged = FALSE;
 static BOOL      g_logicalConnection = FALSE;
-static uint8_t   g_funcFlags = 0x00;  
+
+uint8_t   g_funcFlags = 0x00;  
 
 /*----------------------------------------------------------------------------------------*/
 /* Function declarations                                                                  */
@@ -1128,7 +1093,6 @@ void wf_rawWrite(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t *p
 
 /***************************************************************************************************/
 
-#define WF_DEBUG
 void wf_init() {
     tWFDeviceInfo deviceInfo;
 
@@ -1139,15 +1103,12 @@ void wf_init() {
     wf_getDeviceInfo(&deviceInfo);
 
     // if MRF24WB   
-#if !defined(MRF24WG)
 #ifdef WF_DEBUG
-    usart_putstr(USART1, "romVersion: ");
-    usart_puthex8(USART1, deviceInfo.romVersion);
-    usart_putc(USART1, '\n');
-    usart_putstr(USART1, "patchVersion: ");
-    usart_puthex8(USART1, deviceInfo.patchVersion);
-    usart_putc(USART1, '\n');
+    dbg("romVersion: 0x%x\n", deviceInfo.romVersion);
+    dbg("patchVersion: 0x%x\n", deviceInfo.patchVersion);
 #endif
+
+#if !defined(MRF24WG)
     WF_ASSERT(deviceInfo.romVersion == 0x12);
     WF_ASSERT(deviceInfo.patchVersion >= 0x02);
     if (deviceInfo.romVersion == 0x12 && deviceInfo.patchVersion >= 0x09) {
@@ -1183,12 +1144,11 @@ void wf_getMacAddress(uint8_t* p_mac) {
 
     wf_sendGetParamMsg(PARAM_MAC_ADDRESS, p_mac, WF_MAC_ADDRESS_LENGTH);
 #ifdef WF_DEBUG
-    usart_putstr(USART1, "wf_getMacAddress: ");
+    dbg("wf_getMacAddress: ");
     for(i = 0; i < WF_MAC_ADDRESS_LENGTH; i++) {
-        usart_puthex8(USART1, p_mac[i]);
-        usart_putc(USART1, ' ');
+        dbg("0x%x ", p_mac[i]);
     }
-    usart_putc(USART1, '\n');
+    dbg("\n");
 #endif
 }
 
@@ -1307,18 +1267,14 @@ void wf_setRawRxMgmtInProgress(BOOL action) {
 }
 
 void wf_assertionFailed(uint16_t lineNumber) {
-    usart_putstr(USART1, "wf_assertionFailed: ");
-    usart_putudec(USART1, lineNumber);
-    usart_putc(USART1, '\n');
+    dbg("wf_assertionFailed: line: %u\n", lineNumber);
 }
 
 void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
     tMgmtMsgRxHdr hdr;
 
     //#ifdef WF_DEBUG
-    //  usart_putstr(USART1, "wf_waitForMgmtResponse: ");
-    //  usart_puthex8(USART1, expectedSubtype);
-    //  usart_putc(USART1, '\n');
+    //  dbg("wf_waitForMgmtResponse: 0x%x\n", expectedSubtype);
     //#endif
 
     g_waitingForMgmtResponse = TRUE;
@@ -1348,7 +1304,7 @@ void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
     }
 
     //#ifdef WF_DEBUG
-    //  usart_putstr(USART1, "wf_waitForMgmtResponse complete.\n");
+    //  dbg("wf_waitForMgmtResponse complete.\n");
     //#endif
 
     /* set this back to FALSE so the next mgmt send won't think he has a response before one is received */
@@ -1357,7 +1313,7 @@ void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
     /* if the caller wants to delete the response immediately (doesn't need any data from it */
     if (freeAction == FREE_MGMT_BUFFER) {
         //#ifdef WF_DEBUG
-        //    usart_putstr(USART1, "wf_waitForMgmtResponse: FREE_MGMT_BUFFER\n");
+        //    dbg("wf_waitForMgmtResponse: FREE_MGMT_BUFFER\n");
         //#endif
 
         /* read and verify result before freeing up buffer to ensure our message send was successful */
@@ -1368,11 +1324,11 @@ void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
 
         if (hdr.result == WF_ERROR_DISCONNECT_FAILED || hdr.result == WF_ERROR_NOT_CONNECTED) {
 #ifdef WF_DEBUG
-            usart_putstr(USART1, "Disconnect failed. Disconnect is allowed only when module is in connected state\n");
+            dbg("Disconnect failed. Disconnect is allowed only when module is in connected state\n");
 #endif
         } else if (hdr.result == WF_ERROR_NO_STORED_BSS_DESCRIPTOR) {
 #ifdef WF_DEBUG
-            usart_putstr(USART1, "No stored scan results\n");
+            dbg("No stored scan results\n");
 #endif
         } else {
             WF_ASSERT(hdr.result == WF_SUCCESS);
@@ -1389,7 +1345,7 @@ void wf_waitForMgmtResponse(uint8_t expectedSubtype, uint8_t freeAction) {
         }
 
         //#ifdef WF_DEBUG
-        //    usart_putstr(USART1, "wf_waitForMgmtResponse: FREE_MGMT_BUFFER complete\n");
+        //    dbg("wf_waitForMgmtResponse: FREE_MGMT_BUFFER complete\n");
         //#endif
     }
 }
@@ -1426,10 +1382,8 @@ void wf_processInterruptServiceResult(void) {
 
     /* read hostInt register to determine cause of interrupt */
     hostIntRegValue = wf_read8BitWFRegister(WF_HOST_INTR_REG);
-#ifdef WF_DEBUG
-    usart_putstr(USART1, "hostIntRegValue: ");
-    usart_puthex8(USART1, hostIntRegValue);
-    usart_putc(USART1, '\n');
+#ifdef WF_DEBUG_INT
+    dbg("hostIntRegValue: 0x%x\n", hostIntRegValue);
 #endif
 
     // OR in the saved interrupts during the time when we were waiting for raw complete, set by WFEintHandler()
@@ -1439,10 +1393,8 @@ void wf_processInterruptServiceResult(void) {
     g_hostIntSaved = 0;
 
     hostIntMaskRegValue = wf_read8BitWFRegister(WF_HOST_MASK_REG);
-#ifdef WF_DEBUG
-    usart_putstr(USART1, "hostIntMaskRegValue: ");
-    usart_puthex8(USART1, hostIntMaskRegValue);
-    usart_putc(USART1, '\n');
+#ifdef WF_DEBUG_INT
+    dbg("hostIntMaskRegValue: 0x%x\n", hostIntMaskRegValue);
 #endif
 
     // AND the two registers together to determine which active, enabled interrupt has occurred
@@ -1465,7 +1417,7 @@ void wf_processInterruptServiceResult(void) {
         /* clear this interrupt */
         wf_write8BitWFRegister(WF_HOST_INTR_REG, WF_HOST_INT_MASK_FIFO_0_THRESHOLD);
 #ifdef WF_DEBUG
-        usart_putstr(USART1, "g_hostRAWDataPacketReceived\n");
+        dbg("g_hostRAWDataPacketReceived\n");
 #endif
         g_hostRAWDataPacketReceived = TRUE; /* this global flag is used in MACGetHeader() to determine a received data packet */
     }    // else got a Host interrupt that we don't handle
@@ -1487,9 +1439,7 @@ void wf_processMgmtRxMsg(void) {
     /* read first byte from Mgmt Rx message (msg type) */
     wf_rawRead(RAW_RX_ID, 0, 1, &msgType);
     //#ifdef WF_DEBUG
-    //  usart_putstr(USART1, "wf_processMgmtRxMsg: ");
-    //  usart_putudec(USART1, msgType);
-    //  usart_putc(USART1, '\n');
+    //  dbg("wf_processMgmtRxMsg: %u\n", msgType);
     //#endif
 
     /* if not a management response or management indicate then fatal error */
@@ -1521,9 +1471,7 @@ void wf_processMgmtIndicateMsg() {
 
     /* Determine which event occurred and handle it */
     //#ifdef WF_DEBUG
-    //  usart_putstr(USART1, "wf_processMgmtIndicateMsg: ");
-    //  usart_putudec(USART1, hdr.subType);
-    //  usart_putc(USART1, '\n');
+    //  dbg("wf_processMgmtIndicateMsg: %u\n", hdr.subType);
     //#endif
     switch (hdr.subType) {
         /*-----------------------------------------------------------------*/
@@ -1531,21 +1479,21 @@ void wf_processMgmtIndicateMsg() {
             /*-----------------------------------------------------------------*/
 #if defined(MRF24WG)
             /* There is one data byte with this message */
-            RawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr), 2, buf); /* read first 2 bytes after header */
+            wf_rawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr), 2, buf); /* read first 2 bytes after header */
             /* if connection attempt successful */
             if (buf[0] == CONNECTION_ATTEMPT_SUCCESSFUL) {
                 event = WF_EVENT_CONNECTION_SUCCESSFUL;
                 eventInfo = WF_NO_ADDITIONAL_INFO;
-                SignalWiFiConnectionChanged(TRUE);
+                wf_signalWiFiConnectionChanged(TRUE);
 #if defined (STACK_USE_DHCP_CLIENT)
                 RenewDhcp();
 #endif
-                SetLogicalConnectionState(TRUE);
+                wf_setLogicalConnectionState(TRUE);
             }        /* else connection attempt failed */
             else {
                 event = WF_EVENT_CONNECTION_FAILED;
-                eventInfo = (UINT16) (buf[0] << 8 | buf[1]); /* contains connection failure code */
-                SetLogicalConnectionState(FALSE);
+                eventInfo = (uint16_t) (buf[0] << 8 | buf[1]); /* contains connection failure code */
+                wf_setLogicalConnectionState(FALSE);
             }
 
 #else    /* !defined(MRF24WG) */
@@ -1622,8 +1570,8 @@ void wf_processMgmtIndicateMsg() {
 #if defined(MRF24WG)
         case WF_EVENT_KEY_CALCULATION_REQUEST_SUBTYPE:
             event = WF_EVENT_KEY_CALCULATION_REQUEST;
-            RawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr),
-                    sizeof (tMgmtIndicatePassphraseReady), (UINT8 *) & passphraseReady);
+            wf_rawRead(RAW_MGMT_RX_ID, sizeof (tMgmtIndicateHdr),
+                    sizeof (tMgmtIndicatePassphraseReady), (uint8_t *) & passphraseReady);
             break;
 #endif
 
@@ -1652,7 +1600,7 @@ void wf_setLogicalConnectionState(BOOL state) {
 
 BOOL wf_rawGetMgmtRxBuffer(uint16_t* p_numBytes) {
     BOOL res = TRUE;
-    // UINT16  numBytes;
+    // uint16_t  numBytes;
     *p_numBytes = 0;
 
     // if Raw Rx is not currently mounted, or the Scratch is mounted
@@ -1692,13 +1640,7 @@ uint16_t wf_rawMountRxBuffer(void) {
 
 void wf_rawRead(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t* p_dest) {
     //#ifdef WF_DEBUG
-    //  usart_putstr(USART1, "wf_rawRead: ");
-    //  usart_puthex8(USART1, rawId);
-    //  usart_putstr(USART1, ", ");
-    //  usart_puthex8(USART1, startIndex);
-    //  usart_putstr(USART1, ", ");
-    //  usart_puthex8(USART1, length);
-    //  usart_putc(USART1, '\n');  
+    //  dbg("wf_rawRead: id: 0x%x, idx: 0x%x, len:0x%x\n", rawId, startIndex, length);
     //#endif
     wf_rawSetIndex(rawId, startIndex);
     wf_rawGetByte(rawId, p_dest, length);
@@ -1706,13 +1648,11 @@ void wf_rawRead(uint8_t rawId, uint16_t startIndex, uint16_t length, uint8_t* p_
 
 void wf_rawGetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
     uint8_t regId;
-#if defined(WF_OUTPUT_RAW_TX_RX)
+#if defined(WF_DEBUG_RAW_TX_RX)
     uint16_t i;
 #endif
     //#if defined(WF_DEBUG)
-    //  usart_putstr(USART1, "wf_rawGetByte: ");
-    //  usart_putudec(USART1, length);
-    //  usart_putc(USART1, '\n');
+    //  dbg("wf_rawGetByte: %u\n", length);
     //#endif
 
     /* if reading a data message do following check */
@@ -1726,26 +1666,24 @@ void wf_rawGetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
     regId = (rawId == RAW_ID_0) ? RAW_0_DATA_REG : RAW_1_DATA_REG;
     wf_readWFArray(regId, pBuffer, length);
 
-#if defined(WF_OUTPUT_RAW_TX_RX)
-    usart_putstr(USART1, "wf_rawGetByte (results): ");
+#if defined(WF_DEBUG_RAW_TX_RX)
+    dbg("wf_rawGetByte (results): ");
     for (i = 0; i < length; ++i) {
-        usart_puthex8(USART1, pBuffer[i]);
-        usart_putc(USART1, ' ');
+        dbg("0x%x ", pBuffer[i]);
     }
-    usart_putc(USART1, '\n');
+    dbg("\n");
 #endif
 }
 
 void wf_rawSetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
     uint8_t regId;
-#if defined(WF_OUTPUT_RAW_TX_RX)
+#if defined(WF_DEBUG_RAW_TX_RX)
     uint16_t i;
-    usart_putstr(USART1, "wf_rawSetByte: ");
+    dbg("wf_rawSetByte: ");
     for (i = 0; i < length; ++i) {
-        usart_puthex8(USART1, pBuffer[i]);
-        usart_putc(USART1, ' ');
+        dbg("0x%x ", pBuffer[i]);
     }
-    usart_putc(USART1, '\n');
+    dbg("\n");
 #endif
 
     /* if previously set index past legal range and now trying to write to RAW engine */
@@ -1757,13 +1695,12 @@ void wf_rawSetByte(uint16_t rawId, uint8_t* pBuffer, uint16_t length) {
     regId = (rawId == RAW_ID_0) ? RAW_0_DATA_REG : RAW_1_DATA_REG;
     wf_writeWFArray(regId, pBuffer, length);
 
-#if defined(WF_OUTPUT_RAW_TX_RX)
-    usart_putstr(USART1, "wf_rawSetByte (results): ");
+#if defined(WF_DEBUG_RAW_TX_RX)
+    dbg("wf_rawSetByte (results): ");
     for (i = 0; i < length; ++i) {
-        usart_puthex8(USART1, pBuffer[i]);
-        usart_putc(USART1, ' ');
+        dbg("0x%x ", pBuffer[i]);
     }
-    usart_putc(USART1, '\n');
+    dbg("\n");
 #endif
 }
 
@@ -1774,11 +1711,7 @@ BOOL wf_rawSetIndex(uint16_t rawId, uint8_t index) {
     uint32_t maxAllowedTicks;
 
     //#ifdef WF_DEBUG
-    //  usart_putstr(USART1, "wf_rawSetIndex: ");
-    //  usart_puthex8(USART1, rawId);
-    //  usart_putstr(USART1, ", ");
-    //  usart_puthex8(USART1, index);
-    //  usart_putc(USART1, '\n');
+    //  dbg("wf_rawSetIndex: id: 0x%x, idx: 0x%x\n", rawId, index);
     //#endif
 
     // set the RAW index
@@ -1836,11 +1769,7 @@ void wf_sendMgmtMsg(uint8_t* p_header, uint8_t headerLength, uint8_t* p_data, ui
 
     /* write out management header */
     //#ifdef WF_DEBUG
-    //  usart_putstr(USART1, "wf_sendMgmtMsg: ");
-    //  usart_putudec(USART1, headerLength);
-    //  usart_putstr(USART1, ", ");
-    //  usart_putudec(USART1, dataLength);
-    //  usart_putc(USART1, '\n');
+    //  dbg("wf_sendMgmtMsg: hl: %u, dl: %u\n", headerLength, dataLength);
     //#endif
     wf_rawSetByte(RAW_TX_ID, p_header, headerLength);
 
@@ -2016,9 +1945,7 @@ BOOL wf_isMgmtTxBufAvailable(void) {
 
 void wf_pushRawWindow(uint8_t rawId) {
     //#ifdef WF_DEBUG
-    //  usart_putstr(USART1, "wf_pushRawWindow: ");
-    //  usart_putudec(USART1, rawId);
-    //  usart_putc(USART1, '\n');
+    //  dbg("wf_pushRawWindow: %u\n", rawId);
     //#endif
     wf_rawMove(rawId, RAW_STACK_MEM, FALSE, 0);
 }
@@ -2141,9 +2068,7 @@ uint16_t wf_scan(uint8_t CpId) {
     uint8_t hdr[4];
 
 #ifdef WF_DEBUG
-    usart_putstr(USART1, "wf_scan");
-    usart_puthex8(USART1, CpId);
-    usart_putc(USART1, '\n');
+    dbg("wf_scan: %d\n", CpId);
 #endif
 
     /* WARNING !!! : 
@@ -2157,7 +2082,7 @@ uint16_t wf_scan(uint8_t CpId) {
      */
     if (!wf_cmIsHostScanAllowed()) {
 #ifdef WF_DEBUG
-        usart_putstr(USART1, "wf_scan: wf_cmIsHostScanAllowed\n");
+        dbg("wf_scan: wf_cmIsHostScanAllowed failed!\n");
 #endif
         return WF_ERROR_OPERATION_CANCELLED;
     }
@@ -2410,11 +2335,11 @@ uint8_t wf_read8BitWFRegister(uint8_t regId) {
     return g_buf[1];
 }
 
-static uint8_t rx_buf[20];
+static uint8_t rx_buf[256];
 void spi_transfer(volatile uint8_t* buf, uint16_t len, uint8_t toggle_cs) {
     uint8_t i;
 
-    if (len > 16)
+    if (len > 255)
         while(1) { /* Error! */ };
 
     // CS is active low
@@ -2698,30 +2623,26 @@ uint16_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
 
     /* read preamble header */
 #ifdef WF_DEBUG
-    usart_putstr(USART1, "wf_rawRead: begin\n");
+    dbg("wf_rawRead: begin\n");
 #endif
     wf_rawRead(RAW_RX_ID, ENC_PREAMBLE_OFFSET, WF_RX_PREAMBLE_SIZE, (uint8_t *) & header);
 #ifdef WF_DEBUG
-    usart_putstr(USART1, "wf_rawRead: complete\n");
-    usart_putstr(USART1, "DestMACAddr: ");
-    usart_puthex8(USART1, header.DestMACAddr.v[0]);
-    usart_puthex8(USART1, header.DestMACAddr.v[1]);
-    usart_puthex8(USART1, header.DestMACAddr.v[2]);
-    usart_puthex8(USART1, header.DestMACAddr.v[3]);
-    usart_puthex8(USART1, header.DestMACAddr.v[4]);
-    usart_puthex8(USART1, header.DestMACAddr.v[5]);
-    usart_putstr(USART1, "\n");
-    usart_putstr(USART1, "SourceMACAddr: ");
-    usart_puthex8(USART1, header.SourceMACAddr.v[0]);
-    usart_puthex8(USART1, header.SourceMACAddr.v[1]);
-    usart_puthex8(USART1, header.SourceMACAddr.v[2]);
-    usart_puthex8(USART1, header.SourceMACAddr.v[3]);
-    usart_puthex8(USART1, header.SourceMACAddr.v[4]);
-    usart_puthex8(USART1, header.SourceMACAddr.v[5]);
-    usart_putstr(USART1, "\n");
-    usart_putstr(USART1, "Type: ");
-    usart_puthex16(USART1, header.Type);
-    usart_putstr(USART1, "\n");
+    dbg("wf_rawRead: complete\n");
+    dbg("DestMACAddr: %x:%x:%x:%x:%x:%x\n",
+            header.DestMACAddr.v[0],
+            header.DestMACAddr.v[1],
+            header.DestMACAddr.v[2],
+            header.DestMACAddr.v[3],
+            header.DestMACAddr.v[4],
+            header.DestMACAddr.v[5]);
+    dbg("SourceMACAddr: %x:%x:%x:%x:%x:%x\n",
+            header.SourceMACAddr.v[0],
+            header.SourceMACAddr.v[1],
+            header.SourceMACAddr.v[2],
+            header.SourceMACAddr.v[3],
+            header.SourceMACAddr.v[4],
+            header.SourceMACAddr.v[5]);
+    dbg("Type: 0x%x\n", header.Type);
 #endif
 
     /* as a sanity check verify that the expected bytes contain the SNAP header */
@@ -2732,7 +2653,7 @@ uint16_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
                 header.snap[4] == SNAP_TYPE_VAL &&
                 header.snap[5] == SNAP_TYPE_VAL)) {
 #ifdef WF_DEBUG
-        usart_putstr(USART1, "wf_macGetHeader: snap not verified\n");
+        dbg("wf_macGetHeader: snap not verified\n");
 #endif
 
         /* if a vendor proprietary packet, throw away */
@@ -2744,15 +2665,15 @@ uint16_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
     g_wasDiscarded = TRUE;
 
     /* we can flush any saved RAW state now by saving and restoring the current rx buffer.  */
-    usart_putstr(USART1, "wf_pushRawWindow\n");
+    dbg("wf_pushRawWindow\n");
     wf_pushRawWindow(RAW_RX_ID);
-    usart_putstr(USART1, "wf_popRawWindow\n");
+    dbg("wf_popRawWindow\n");
     wf_popRawWindow(RAW_RX_ID);
 
     // set RAW pointer to 802.11 payload
-    usart_putstr(USART1, "wf_rawSetIndex\n");
+    dbg("wf_rawSetIndex\n");
     wf_rawSetIndex(RAW_RX_ID, (ENC_PREAMBLE_OFFSET + WF_RX_PREAMBLE_SIZE));
-    usart_putstr(USART1, "wf_rawSetIndex: done\n");
+    dbg("wf_rawSetIndex: done\n");
 
     g_rxBufferSize = len;
     /////    RawWindowReady[RAW_RX_ID] = TRUE;
@@ -2777,9 +2698,7 @@ uint16_t wf_macGetHeader(MAC_ADDR* remote, uint8_t* type) {
         *type = typeLow;
     }
 #ifdef WF_DEBUG
-    usart_putstr(USART1, "wf_macGetHeader type:");
-    usart_puthex8(USART1, *type);
-    usart_putc(USART1, '\n');
+    dbg("wf_macGetHeader type: 0x%x\n", *type);
 #endif
 
     // Mark this packet as discardable
@@ -2804,9 +2723,7 @@ uint16_t wf_macIFService(void) {
     /* Function call returns number of bytes in the data packet.                           */
     byteCount = wf_rawMountRxBuffer();
 #ifdef WF_DEBUG
-    usart_putstr(USART1, "wf_macIFService result:");
-    usart_putudec(USART1, byteCount);
-    usart_putc(USART1, '\n');
+    dbg("wf_macIFService result: %u\n", byteCount);
 #endif
     if(byteCount == 0) {
         return 0;
@@ -2819,13 +2736,8 @@ uint16_t wf_macIFService(void) {
     wf_rawGetByte(RAW_RX_ID, (uint8_t*) & wfPreamble, sizeof (tRxPreamble));
     WF_ASSERT(wfPreamble.type == WF_DATA_RX_INDICATE_TYPE);
 #ifdef WF_DEBUG
-    usart_putstr(USART1, "wfPreamble.type:");
-    usart_putudec(USART1, wfPreamble.type);
-    usart_putc(USART1, '\n');
-
-    usart_putstr(USART1, "wfPreamble.subType:");
-    usart_putudec(USART1, wfPreamble.subType);
-    usart_putc(USART1, '\n');
+    dbg("wfPreamble.type: %u\n", wfPreamble.type);
+    dbg("wfPreamble.subType: %u\n", wfPreamble.subType);
 #endif
 
     return byteCount;
@@ -2953,9 +2865,7 @@ void wf_sendRAWDataFrame(uint16_t bufLen) {
     uint8_t txDataPreamble[4] = {WF_DATA_REQUEST_TYPE, WF_STD_DATA_MSG_SUBTYPE, 1, 0};
 
 #ifdef WF_DEBUG
-    usart_putstr(USART1, "wf_sendRAWDataFrame: ");
-    usart_putudec(USART1, bufLen);
-    usart_putc(USART1, '\n');
+    dbg("wf_sendRAWDataFrame: %u\n", bufLen);
 #endif
 
     wf_rawWrite(RAW_TX_ID, 0, sizeof (txDataPreamble), txDataPreamble);

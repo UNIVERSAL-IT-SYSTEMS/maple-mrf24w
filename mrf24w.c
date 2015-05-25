@@ -19,6 +19,9 @@ uint8_t stack_local_ip[4] = {192, 168, 0, 99};
 uint8_t stack_gateway_ip[4] = {192, 168, 0, 1};
 uint8_t stack_subnet_mask[4] = {255, 255, 255, 0};
 
+// XXX: temp, better way?
+int g_scanResultsReady = 0;
+
 #define ASSERT(cond)    do{ if (!(cond)) { printf("assert in %s:%d\n", __FILE__, __LINE__, 0); while (1) {}; } } while (0)
 
 /* SPI module */
@@ -53,14 +56,25 @@ void SPI2_IRQHandler(void)
 void EXTI15_10_IRQHandler(void)
 {
   HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-  //XXX HAL_SPI_Transmit_IT( &hspi , (uint8_t*)aTxBuffer , 10 );
   wf_isr();
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_11);
 } 
 
+// XXX: supposed to be the wf_processEvent user callback
 void wf_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) {
-    ASSERT(g_mrf24wInstance);
     mrf24w_processEvent(event, eventInfo, extraInfo);
+}
+
+static int pico_mrf24_poll(struct pico_device * dev, int loop_score)
+{
+    wf_macProcess();
+    if (g_scanResultsReady)
+        wf_printScanResults();
+}
+
+static int pico_mrf24_send(struct pico_device * dev, void * buf, int len)
+{
+    printf(">tx %db\n", len);
 }
 
 struct pico_device * pico_eth_create(char *name, uint8_t *mac)
@@ -70,11 +84,39 @@ struct pico_device * pico_eth_create(char *name, uint8_t *mac)
         return NULL;
 
     /*          SPI             CS,               RESET            INTERRUPT   */
-    printf("mrf24w_init\n");
+    printf("mrf24w> init\n");
     mrf24w_init(SPI2, GPIOB, GPIO_PIN_12, GPIOB, GPIO_PIN_10, GPIOB, GPIO_PIN_11);
-
-    printf("wf_init\n");
     wf_init();
+
+    mrf24wg->poll = pico_mrf24_poll;
+    mrf24wg->send = pico_mrf24_send;
+
+    /* Get MAC address */
+    wf_getMacAddress(mac);
+    printf("mrf24w> mac: %x:%x:%x:%x:%x:%x\n", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+
+    if(0 != pico_device_init(mrf24wg, name, mac)) {
+        dbg("mrf24w> init failed.\r\n");
+        return NULL;
+    }
+
+    /* start with a scan */
+    {
+        uint8_t connectionProfileId;
+        uint8_t channelList[] = {};
+
+        //connectionProfileId = wf_cpCreate();
+        //ASSERT(connectionProfileId != 0xff);
+        //wf_cpSetSsid(connectionProfileId, (uint8_t*) m_ssid, strlen(m_ssid));
+        //wf_cpSetNetworkType(connectionProfileId, m_wirelessMode);
+        //wf_caSetScanType(WF_ACTIVE_SCAN);
+        //wf_caSetChannelList(channelList, sizeof (channelList));
+        //wf_caSetListRetryCount(10);
+        //wf_caSetBeaconTimeout(40);
+        //wf_cpSetSecurity(connectionProfileId, m_securityType, 0, m_securityPassphrase, m_securityPassphraseLen);
+        //wf_cmConnect(connectionProfileId);
+        wf_scan(0xFF); // Scan using default filter
+    }
 
     return mrf24wg;
 }
@@ -155,10 +197,6 @@ void mrf24w_init(SPI_TypeDef *spi, GPIO_TypeDef *cs_gpio, uint16_t cs_pin, GPIO_
     HAL_SPI_Init(&hspi);
 }
 
-void mrf24w_end() {
-
-}
-
 void mrf24w_setProcessEventFn(void * processEventFn)
 {
     m_processEventFn = processEventFn;
@@ -182,14 +220,6 @@ void mrf24w_connect() {
     wf_caSetBeaconTimeout(40);
     wf_cpSetSecurity(connectionProfileId, m_securityType, 0, m_securityPassphrase, m_securityPassphraseLen);
     wf_cmConnect(connectionProfileId);
-}
-
-void mrf24w_loop() {
-    if (wf_connected) {
-        // TODO:
-        //stack_loop();
-    }
-    wf_macProcess();
 }
 
 void mrf24w_setLocalIp(uint8_t localIpAddr[]) {
@@ -224,7 +254,7 @@ void mrf24w_setWirelessMode(uint8_t wirelessMode) {
 void mrf24w_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) {
     wf_setFuncState(WF_PROCESS_EVENT_FUNC, WF_ENTERING_FUNCTION);
 
-    printf("wf_processEvent: %s, %s\n", event, eventInfo);
+    printf("wf_processEvent: %d, %d\n", event, eventInfo);
 
     switch (event) {
         case WF_EVENT_CONNECTION_SUCCESSFUL:
@@ -232,15 +262,15 @@ void mrf24w_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) 
             break;
 
         case WF_EVENT_CONNECTION_FAILED:
-            printf("WF_EVENT_CONNECTION_FAILED: %s\n", eventInfo);
+            printf("WF_EVENT_CONNECTION_FAILED: %d\n", eventInfo);
             break;
 
         case WF_EVENT_CONNECTION_TEMPORARILY_LOST:
-            printf("WF_EVENT_CONNECTION_TEMPORARILY_LOST: %s\n", eventInfo);
+            printf("WF_EVENT_CONNECTION_TEMPORARILY_LOST: %d\n", eventInfo);
             break;
 
         case WF_EVENT_CONNECTION_PERMANENTLY_LOST:
-            printf("WF_EVENT_CONNECTION_PERMANENTLY_LOST: %s\n", eventInfo);
+            printf("WF_EVENT_CONNECTION_PERMANENTLY_LOST: %d\n", eventInfo);
             break;
 
         case WF_EVENT_CONNECTION_REESTABLISHED:
@@ -249,21 +279,13 @@ void mrf24w_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) 
 
         case WF_EVENT_SCAN_RESULTS_READY:
             {
-                uint16_t i;
-                tWFScanResult scanResult;
-                printf("WF_EVENT_SCAN_RESULTS_READY: %s\n", eventInfo);
-                for (i = 0; i < eventInfo; i++) {
-                    char ssid[20];
-                    wf_scanGetResult(i, &scanResult);
-                    strncpy(ssid, (const char*) scanResult.ssid, scanResult.ssidLen);
-                    ssid[scanResult.ssidLen] = '\0';
-                    printf("%s\n", ssid);
-                }
+                g_scanResultsReady = eventInfo;
+                printf("WF_EVENT_SCAN_RESULTS_READY: %d results\n", eventInfo);
                 break;
             }
 
         case WF_EVENT_RX_PACKET_RECEIVED:
-            printf("WF_EVENT_RX_PACKET_RECEIVED: %s\n", eventInfo);
+            printf("WF_EVENT_RX_PACKET_RECEIVED: %d\n", eventInfo);
             break;
 
         case WF_EVENT_INVALID_WPS_PIN:
@@ -271,7 +293,7 @@ void mrf24w_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) 
             break;
 
         default:
-            printf("UNKNOWN Event: %s\n", eventInfo);
+            printf("UNKNOWN Event: %d\n", eventInfo);
             break;
     }
 
@@ -281,5 +303,22 @@ void mrf24w_processEvent(uint8_t event, uint16_t eventInfo, uint8_t* extraInfo) 
     }
 
     wf_setFuncState(WF_PROCESS_EVENT_FUNC, WF_LEAVING_FUNCTION);
+}
+
+void wf_printScanResults(void)
+{
+    int i;
+    int amount = g_scanResultsReady;
+    tWFScanResult scanResult;
+
+    g_scanResultsReady = 0;
+
+    for (i = 0; i < amount; i++) {
+        char ssid[20];
+        wf_scanGetResult(i, &scanResult);
+        strncpy(ssid, (const char*) scanResult.ssid, scanResult.ssidLen);
+        ssid[scanResult.ssidLen] = '\0';
+        printf("%s\n", ssid);
+    }
 }
 
